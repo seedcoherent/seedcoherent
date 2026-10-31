@@ -2,6 +2,12 @@
 
 **Point it at your Postgres, MySQL, SQLite, or SQL Server schema, get coherent, referentially-correct fake data.**
 
+[![CI](https://github.com/jajjer/seedcoherent/actions/workflows/ci.yml/badge.svg)](https://github.com/jajjer/seedcoherent/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/seedcoherent.svg)](https://www.npmjs.com/package/seedcoherent)
+[![npm downloads](https://img.shields.io/npm/dm/seedcoherent.svg)](https://www.npmjs.com/package/seedcoherent)
+[![license](https://img.shields.io/npm/l/seedcoherent.svg)](./LICENSE)
+[![node](https://img.shields.io/node/v/seedcoherent.svg)](https://nodejs.org)
+
 ![seedcoherent demo](demo/demo.gif)
 
 Faker doesn't understand your schema. `seedcoherent` reads your live database,
@@ -37,6 +43,61 @@ without TLS, append `?encrypt=false&trustServerCertificate=true`.)
 
 That's it. No config, no schema annotations, no per-column mapping. It introspects
 everything and inserts in dependency order inside a single transaction.
+
+## Who this is for
+
+**A good fit for**
+
+- Seeding local, CI, and staging databases with realistic, coherent data instead
+  of hand-written fixtures or lorem-ipsum Faker output.
+- Carving a small, referentially-complete slice of production into a safe
+  environment — `--subset` closes over the FK graph and `--anonymize` scrubs PII.
+- Load- and performance-test fixtures with production-like shape (`--profile`,
+  `--distribution`, `--cardinality`).
+- Demos and tutorials against a real schema — or no schema at all, via `--demo`.
+
+**Not the right tool for**
+
+- Migrating or transforming *real* production data (it generates synthetic rows).
+- Mocking an HTTP API or in-memory objects — it writes to a database (or a
+  `.sql`/CSV/NDJSON file).
+- Generating data with no schema to read — it's schema-driven by design (`--demo`
+  shows the shape on a bundled schema).
+- Guaranteeing statistical fidelity beyond the shapes `--profile` captures (NULL
+  rates, categorical weights, FK fan-out, time window).
+
+## What it does
+
+| Capability | Supported | Notes |
+| --- | :---: | --- |
+| Referential integrity | ✅ | No orphan rows; composite & self-referential FKs |
+| Constraint-aware | ✅ | `NOT NULL`, `UNIQUE` (single/composite), enums, `varchar(n)`, common `CHECK`s |
+| Realistic values | ✅ | Name + type inference; shapes `json`/`jsonb` by column name |
+| Locales | ✅ | `--locale de\|fr\|ja\|…` — any of Faker's 70+ locales |
+| FK fan-out skew | ✅ | `--distribution zipf` for lopsided, production-like relationships |
+| Bounded relationships | ✅ | `--cardinality orders.user_id=1-3`; exact counts; true 1:1 |
+| Per-column null rates | ✅ | `--null-rate users.middle_name=0.7` |
+| Learn from real data | ✅ | `--profile` derives null rates, weights, fan-out, time window (read-only) |
+| Temporal & status coherence | ✅ | Timestamps respect causality; lifecycle `status` ↔ event timestamps |
+| Subset + anonymize | ✅ | `--subset` closes over the FK graph; `--anonymize` scrubs PII consistently |
+| Grow existing data | ✅ | `--append` adds rows past the current max id |
+| Deterministic output | ✅ | `--seed 42` → byte-identical every run |
+| Output targets | ✅ | Live insert, `.sql` file, stdout, CSV, NDJSON |
+
+**Four databases, one tool** — selected from the connection string, same flags:
+
+| | Postgres | MySQL | SQLite | SQL Server |
+| --- | :---: | :---: | :---: | :---: |
+| Introspect schema | ✅ | ✅ | ✅ | ✅ |
+| Live insert | ✅ | ✅ | ✅ | ✅ |
+| `.sql` / stdout | ✅ | ✅ | ✅ | ✅ |
+| Subset + anonymize | ✅ | ✅ | ✅ | ✅ |
+| `--append` | ✅ | ✅ | ✅ | ✅ |
+
+Postgres streams via `COPY`; MySQL, SQLite, and SQL Server stream batched
+multi-row `INSERT`s (`--on-conflict` renders a `MERGE` on SQL Server). Per-engine
+type coverage (`ENUM`, `JSON`, `bit`/`tinyint(1)` booleans, `IDENTITY`/`SERIAL`
+PKs, `uniqueidentifier`, …) is detailed under [Why it's different](#why-its-different).
 
 ## Why it's different
 
