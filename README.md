@@ -66,6 +66,16 @@ everything and inserts in dependency order inside a single transaction.
 - Guaranteeing statistical fidelity beyond the shapes `--profile` captures (NULL
   rates, categorical weights, FK fan-out, time window).
 
+## How it compares
+
+Shopping against another tool? The [comparisons](./docs/comparisons/) spell out,
+honestly, where `seedcoherent` fits and where something else is the better call:
+
+- [vs. Faker](./docs/comparisons/vs-faker.md) — realistic values vs. a realistic *database*
+- [vs. Snaplet Seed](./docs/comparisons/vs-snaplet.md) — zero-config CLI vs. a code-first seed script
+- [vs. Mockaroo](./docs/comparisons/vs-mockaroo.md) — whole-schema generation vs. a table at a time
+- [vs. hand-rolled `pg_dump` sampling](./docs/comparisons/vs-pg-dump.md) — `--subset` + `--anonymize` vs. a DIY pipeline
+
 ## What it does
 
 | Capability | Supported | Notes |
