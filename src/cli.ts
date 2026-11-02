@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-/** seedcoherent — schema-aware synthetic data generator for Postgres, MySQL, and SQLite. */
+/** seedcoherent — schema-aware synthetic data generator for Postgres, MySQL, SQLite, and SQL Server. */
 
 import { readFile, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import {
   loadConfig,
@@ -59,615 +60,633 @@ import { temporalWindow } from "./temporal.js";
 import type { Config, OnConflict, OutputFormat, TableInfo } from "./types.js";
 import type { TableData } from "./generate.js";
 
-const program = new Command();
+/**
+ * Build a fresh, fully-wired CLI program. A new instance per call avoids
+ * commander's cross-parse option accumulation (several options default to `[]`),
+ * so callers — including tests — can construct and parse repeatedly.
+ */
+export function buildProgram(): Command {
+  const program = new Command();
 
-program
-  .name("seedcoherent")
-  .description(
-    "Point it at your Postgres, MySQL, or SQLite schema, get coherent, referentially-correct fake data.",
-  )
-  .argument(
-    "[connection]",
-    "Postgres/MySQL/SQLite connection string or SQLite file path (or set DATABASE_URL)",
-  )
-  .option(
-    "-r, --rows <spec...>",
-    "rows per table, e.g. users=1000 orders=5000",
-    [],
-  )
-  .option("-d, --default-rows <n>", "default rows for tables not listed", (v) =>
-    parseInt(v, 10),
-  )
-  .option("-s, --seed <n>", "RNG seed for deterministic output", (v) =>
-    parseInt(v, 10),
-  )
-  .option(
-    "--locale <code>",
-    "Faker locale for generated values, e.g. de, fr, pt_BR, en_GB (default: en_US)",
-  )
-  .option(
-    "--since <date>",
-    "earliest creation timestamp (ISO date), e.g. 2023-01-01",
-  )
-  .option(
-    "--until <date>",
-    "latest creation timestamp (ISO date); defaults to the seed reference date / now",
-  )
-  .option("--batch-size <n>", "rows per COPY batch (default 10000)", (v) =>
-    parseInt(v, 10),
-  )
-  .option(
-    "--schema <name...>",
-    "schema(s)/database(s) to read (default: public on Postgres / the MySQL database / main on SQLite)",
-  )
-  .option("--skip <table...>", "tables to leave empty", [])
-  .option(
-    "--distribution <spec...>",
-    "skew a column: FK fan-out (orders.user_id=zipf), or a value column's labels (orders.status=zipf, orders.status=weighted:paid=0.9,refunded=0.1)",
-    [],
-  )
-  .option(
-    "--cardinality <spec...>",
-    "bound children per parent on an FK (derives the child row count): order_items.order_id=3 (exactly 3), orders.user_id=1-3 (1 to 3)",
-    [],
-  )
-  .option(
-    "-C, --column <spec...>",
-    "override a column's generator: users.email=internet.email, status=values:active,inactive, or tier=value:gold",
-    [],
-  )
-  .option(
-    "--null-rate <spec...>",
-    "fraction (0-1) of rows a nullable column is left NULL, e.g. users.middle_name=0.7 or orders.deleted_at=1",
-    [],
-  )
-  .option(
-    "--profile",
-    "sample the existing data and match its shape: derive per-column null rates, categorical value weights, FK fan-out skew, and the timestamp window, then generate to match (your own flags still win)",
-  )
-  .option(
-    "--profile-out <file>",
-    "write the config derived by profiling to a JSON file and exit (no generation); reuse it later with --config",
-  )
-  .option("-c, --config <path>", "path to a config file")
-  .option(
-    "--schema-file <path>",
-    "read the schema from a .sql/DDL file instead of a live database (no connection needed; requires -o/--print)",
-  )
-  .option(
-    "--dialect <name>",
-    "engine for --schema-file: parses that DDL grammar and emits that SQL flavor — postgres (default), mysql, sqlite, or sqlserver",
-  )
-  .option(
-    "--schema-dialect <name>",
-    "override the input DDL grammar alone (defaults to --dialect), to translate one engine's schema into another's seed SQL",
-  )
-  .option(
-    "--format <name>",
-    "output format for -o/--print: sql (default), csv, or ndjson. csv/ndjson write one file per table into the -o <dir> directory",
-  )
-  .option(
-    "--on-conflict <action>",
-    "make the generated SQL re-runnable against a populated DB: skip rows that collide with an existing primary/unique key (Postgres ON CONFLICT DO NOTHING, MySQL INSERT IGNORE, SQLite INSERT OR IGNORE), or update the existing row with the new values (Postgres ON CONFLICT (...) DO UPDATE SET, MySQL ON DUPLICATE KEY UPDATE, SQLite ON CONFLICT DO UPDATE SET). action: skip | update. --format sql only",
-  )
-  .option(
-    "-o, --out <file>",
-    "write SQL to a file (or, with --format csv/ndjson, one file per table into this directory) instead of inserting",
-  )
-  .option("--print", "print SQL to stdout instead of inserting")
-  .option(
-    "--dry-run",
-    "preview the plan (table order, row counts, sample rows) without writing",
-  )
-  .option(
-    "--demo",
-    "generate and print sample rows from a bundled example schema — no database or flags required",
-  )
-  .option(
-    "--append",
-    "add rows to a database that already has data: only --rows tables are grown, their FKs reference existing rows, and synthetic ids continue past the current max",
-  )
-  .option("--truncate", "TRUNCATE target tables before inserting")
-  .option(
-    "--subset <spec...>",
-    "subset+anonymize real data: seed rows per root table, e.g. orders=500 users=100",
-    [],
-  )
-  .option("--to <connection>", "target DB to insert the anonymized subset into")
-  .option(
-    "--where <spec...>",
-    'subset: filter which root rows are seeded with a raw-SQL predicate, e.g. orders="total > 100" (table must be a --subset root; parents are still pulled)',
-    [],
-  )
-  .option(
-    "--sample",
-    "subset: pick root rows at random instead of the first N by primary key (reproducible when --seed is set)",
-  )
-  .option(
-    "--sample-rate <spec...>",
-    "subset: sample a fraction of a root's matching rows instead of a fixed count, e.g. orders=0.1 (table must be a --subset root; implies --sample for it)",
-    [],
-  )
-  .option(
-    "--children",
-    "subset: also pull child rows that reference collected rows (downward FK traversal)",
-  )
-  .option(
-    "--anonymize <col...>",
-    "subset: also scrub these join keys, e.g. accounts.email (remaps the whole join)",
-    [],
-  )
-  .option(
-    "--preserve <col...>",
-    "subset: keep these columns' real values, e.g. users.country",
-    [],
-  )
-  .option(
-    "--link <group...>",
-    "subset: scrub these columns to the SAME fake (denormalized copies), e.g. users.email=orders.customer_email",
-    [],
-  )
-  .option(
-    "--secret <key>",
-    "subset: HMAC key for deterministic anonymization — same secret produces same fakes across runs",
-  )
-  .option(
-    "--scrub-keys",
-    "subset: automatically anonymize key columns that look like PII (what the leak warning suggests), remapped consistently across joins",
-  )
-  .option(
-    "--scan",
-    "subset: print a per-column privacy report (PII class + scrub/keep/key action) and exit without copying any data",
-  )
-  .option(
-    "--json",
-    "with --scan: emit the privacy report as JSON instead of a table",
-  )
-  .action(async (connection, opts) => {
-    // --demo runs the offline path against a bundled schema, so it needs no
-    // connection string (and rejects one, below) just like --schema-file.
-    const offline = !!opts.schemaFile || !!opts.demo;
-    const connStr = connection ?? process.env.DATABASE_URL;
-    if (opts.demo && connStr) {
-      program.error(
-        "--demo runs against a bundled example schema; it takes no connection string or DATABASE_URL.",
-      );
-    }
-    if (!connStr && !offline) {
-      program.error(
-        "No connection string. Pass one as an argument or set DATABASE_URL.",
-      );
-    }
-
-    const fileConfig = await loadConfig(opts.config);
-    const config: Config = {
-      ...fileConfig,
-      rows: { ...fileConfig.rows, ...parseRowSpecs(opts.rows) },
-      columns: { ...fileConfig.columns, ...parseColumnSpecs(opts.column) },
-      defaultRows: opts.defaultRows ?? fileConfig.defaultRows,
-      seed: opts.seed ?? fileConfig.seed,
-      locale: opts.locale ?? fileConfig.locale,
-      since: opts.since ?? fileConfig.since,
-      until: opts.until ?? fileConfig.until,
-      batchSize: opts.batchSize ?? fileConfig.batchSize,
-      format: opts.format ?? fileConfig.format,
-      onConflict: opts.onConflict ?? fileConfig.onConflict,
-      skip: [...(fileConfig.skip ?? []), ...opts.skip],
-      distributions: {
-        ...fileConfig.distributions,
-        ...parseDistSpecs(opts.distribution),
-      },
-      cardinality: {
-        ...fileConfig.cardinality,
-        ...parseCardinalitySpecs(opts.cardinality),
-      },
-      nullRates: {
-        ...fileConfig.nullRates,
-        ...parseNullRateSpecs(opts.nullRate),
-      },
-      anonymize: [...(fileConfig.anonymize ?? []), ...opts.anonymize],
-      preserve: [...(fileConfig.preserve ?? []), ...opts.preserve],
-      link: [...(fileConfig.link ?? []), ...parseLinkGroups(opts.link)],
-      secret: opts.secret ?? fileConfig.secret,
-    };
-
-    // Validate the temporal window and locale up front so a bad --since/--until
-    // or --locale fails before we connect (the dry-run plan path never reaches
-    // streamData, where the locale would otherwise first be resolved).
-    try {
-      temporalWindow(config);
-      resolveLocale(config.locale);
-      validateNullRates(config.nullRates);
-      validateCardinality(config.cardinality);
-    } catch (err) {
-      program.error(err instanceof Error ? err.message : String(err));
-    }
-
-    // --format selects how the --out/--print path serializes rows. `sql` is the
-    // default and unchanged; `csv`/`ndjson` write one file per table into an
-    // --out directory, so the destinations that only SQL can reach (stdout, a
-    // live DB via direct insert or --to, and TRUNCATE) are rejected up front.
-    // A dry-run writes nothing, so it skips these destination checks.
-    const format: OutputFormat = config.format ?? "sql";
-    if (config.format !== undefined && !isOutputFormat(config.format)) {
-      program.error(
-        `Unknown --format '${config.format}'. Use ${OUTPUT_FORMATS.join(", ")}.`,
-      );
-    }
-    if (format !== "sql" && !opts.dryRun) {
-      if (opts.print)
+  program
+    .name("seedcoherent")
+    .description(
+      "Point it at your Postgres, MySQL, SQLite, or SQL Server schema, get coherent, referentially-correct fake data.",
+    )
+    .argument(
+      "[connection]",
+      "Postgres/MySQL/SQLite connection string or SQLite file path (or set DATABASE_URL)",
+    )
+    .option(
+      "-r, --rows <spec...>",
+      "rows per table, e.g. users=1000 orders=5000",
+      [],
+    )
+    .option(
+      "-d, --default-rows <n>",
+      "default rows for tables not listed",
+      (v) => parseInt(v, 10),
+    )
+    .option("-s, --seed <n>", "RNG seed for deterministic output", (v) =>
+      parseInt(v, 10),
+    )
+    .option(
+      "--locale <code>",
+      "Faker locale for generated values, e.g. de, fr, pt_BR, en_GB (default: en_US)",
+    )
+    .option(
+      "--since <date>",
+      "earliest creation timestamp (ISO date), e.g. 2023-01-01",
+    )
+    .option(
+      "--until <date>",
+      "latest creation timestamp (ISO date); defaults to the seed reference date / now",
+    )
+    .option("--batch-size <n>", "rows per COPY batch (default 10000)", (v) =>
+      parseInt(v, 10),
+    )
+    .option(
+      "--schema <name...>",
+      "schema(s)/database(s) to read (default: public on Postgres / the MySQL database / main on SQLite)",
+    )
+    .option("--skip <table...>", "tables to leave empty", [])
+    .option(
+      "--distribution <spec...>",
+      "skew a column: FK fan-out (orders.user_id=zipf), or a value column's labels (orders.status=zipf, orders.status=weighted:paid=0.9,refunded=0.1)",
+      [],
+    )
+    .option(
+      "--cardinality <spec...>",
+      "bound children per parent on an FK (derives the child row count): order_items.order_id=3 (exactly 3), orders.user_id=1-3 (1 to 3)",
+      [],
+    )
+    .option(
+      "-C, --column <spec...>",
+      "override a column's generator: users.email=internet.email, status=values:active,inactive, or tier=value:gold",
+      [],
+    )
+    .option(
+      "--null-rate <spec...>",
+      "fraction (0-1) of rows a nullable column is left NULL, e.g. users.middle_name=0.7 or orders.deleted_at=1",
+      [],
+    )
+    .option(
+      "--profile",
+      "sample the existing data and match its shape: derive per-column null rates, categorical value weights, FK fan-out skew, and the timestamp window, then generate to match (your own flags still win)",
+    )
+    .option(
+      "--profile-out <file>",
+      "write the config derived by profiling to a JSON file and exit (no generation); reuse it later with --config",
+    )
+    .option("-c, --config <path>", "path to a config file")
+    .option(
+      "--schema-file <path>",
+      "read the schema from a .sql/DDL file instead of a live database (no connection needed; requires -o/--print)",
+    )
+    .option(
+      "--dialect <name>",
+      "engine for --schema-file: parses that DDL grammar and emits that SQL flavor — postgres (default), mysql, sqlite, or sqlserver",
+    )
+    .option(
+      "--schema-dialect <name>",
+      "override the input DDL grammar alone (defaults to --dialect), to translate one engine's schema into another's seed SQL",
+    )
+    .option(
+      "--format <name>",
+      "output format for -o/--print: sql (default), csv, or ndjson. csv/ndjson write one file per table into the -o <dir> directory",
+    )
+    .option(
+      "--on-conflict <action>",
+      "make the generated SQL re-runnable against a populated DB: skip rows that collide with an existing primary/unique key (Postgres ON CONFLICT DO NOTHING, MySQL INSERT IGNORE, SQLite INSERT OR IGNORE), or update the existing row with the new values (Postgres ON CONFLICT (...) DO UPDATE SET, MySQL ON DUPLICATE KEY UPDATE, SQLite ON CONFLICT DO UPDATE SET). action: skip | update. --format sql only",
+    )
+    .option(
+      "-o, --out <file>",
+      "write SQL to a file (or, with --format csv/ndjson, one file per table into this directory) instead of inserting",
+    )
+    .option("--print", "print SQL to stdout instead of inserting")
+    .option(
+      "--dry-run",
+      "preview the plan (table order, row counts, sample rows) without writing",
+    )
+    .option(
+      "--demo",
+      "generate and print sample rows from a bundled example schema — no database or flags required",
+    )
+    .option(
+      "--append",
+      "add rows to a database that already has data: only --rows tables are grown, their FKs reference existing rows, and synthetic ids continue past the current max",
+    )
+    .option("--truncate", "TRUNCATE target tables before inserting")
+    .option(
+      "--subset <spec...>",
+      "subset+anonymize real data: seed rows per root table, e.g. orders=500 users=100",
+      [],
+    )
+    .option(
+      "--to <connection>",
+      "target DB to insert the anonymized subset into",
+    )
+    .option(
+      "--where <spec...>",
+      'subset: filter which root rows are seeded with a raw-SQL predicate, e.g. orders="total > 100" (table must be a --subset root; parents are still pulled)',
+      [],
+    )
+    .option(
+      "--sample",
+      "subset: pick root rows at random instead of the first N by primary key (reproducible when --seed is set)",
+    )
+    .option(
+      "--sample-rate <spec...>",
+      "subset: sample a fraction of a root's matching rows instead of a fixed count, e.g. orders=0.1 (table must be a --subset root; implies --sample for it)",
+      [],
+    )
+    .option(
+      "--children",
+      "subset: also pull child rows that reference collected rows (downward FK traversal)",
+    )
+    .option(
+      "--anonymize <col...>",
+      "subset: also scrub these join keys, e.g. accounts.email (remaps the whole join)",
+      [],
+    )
+    .option(
+      "--preserve <col...>",
+      "subset: keep these columns' real values, e.g. users.country",
+      [],
+    )
+    .option(
+      "--link <group...>",
+      "subset: scrub these columns to the SAME fake (denormalized copies), e.g. users.email=orders.customer_email",
+      [],
+    )
+    .option(
+      "--secret <key>",
+      "subset: HMAC key for deterministic anonymization — same secret produces same fakes across runs",
+    )
+    .option(
+      "--scrub-keys",
+      "subset: automatically anonymize key columns that look like PII (what the leak warning suggests), remapped consistently across joins",
+    )
+    .option(
+      "--scan",
+      "subset: print a per-column privacy report (PII class + scrub/keep/key action) and exit without copying any data",
+    )
+    .option(
+      "--json",
+      "with --scan: emit the privacy report as JSON instead of a table",
+    )
+    .action(async (connection, opts) => {
+      // --demo runs the offline path against a bundled schema, so it needs no
+      // connection string (and rejects one, below) just like --schema-file.
+      const offline = !!opts.schemaFile || !!opts.demo;
+      const connStr = connection ?? process.env.DATABASE_URL;
+      if (opts.demo && connStr) {
         program.error(
-          `--format ${format} writes one file per table; use --out <dir> instead of --print.`,
-        );
-      if (opts.to)
-        program.error(
-          `--format ${format} writes files, not to a database; use --out <dir> instead of --to.`,
-        );
-      if (opts.truncate)
-        program.error(
-          `--truncate has no meaning with --format ${format}; it only writes files.`,
-        );
-      if (!opts.out)
-        program.error(
-          `--format ${format} needs an output directory: pass --out <dir>.`,
-        );
-    }
-
-    // --on-conflict only rewrites the generated INSERTs, so it needs the SQL
-    // script path: --format sql to a file (--out) or stdout (--print), never a
-    // direct/`--to` live insert (COPY/streamed INSERTs have no skip form here)
-    // or a csv/ndjson file. A dry-run writes nothing, so it skips these checks.
-    if (config.onConflict !== undefined) {
-      if (!["skip", "update"].includes(config.onConflict)) {
-        program.error(
-          `Unknown --on-conflict '${config.onConflict}'. Use skip or update.`,
+          "--demo runs against a bundled example schema; it takes no connection string or DATABASE_URL.",
         );
       }
-      if (!opts.dryRun) {
-        if (format !== "sql") {
+      if (!connStr && !offline) {
+        program.error(
+          "No connection string. Pass one as an argument or set DATABASE_URL.",
+        );
+      }
+
+      const fileConfig = await loadConfig(opts.config);
+      const config: Config = {
+        ...fileConfig,
+        rows: { ...fileConfig.rows, ...parseRowSpecs(opts.rows) },
+        columns: { ...fileConfig.columns, ...parseColumnSpecs(opts.column) },
+        defaultRows: opts.defaultRows ?? fileConfig.defaultRows,
+        seed: opts.seed ?? fileConfig.seed,
+        locale: opts.locale ?? fileConfig.locale,
+        since: opts.since ?? fileConfig.since,
+        until: opts.until ?? fileConfig.until,
+        batchSize: opts.batchSize ?? fileConfig.batchSize,
+        format: opts.format ?? fileConfig.format,
+        onConflict: opts.onConflict ?? fileConfig.onConflict,
+        skip: [...(fileConfig.skip ?? []), ...opts.skip],
+        distributions: {
+          ...fileConfig.distributions,
+          ...parseDistSpecs(opts.distribution),
+        },
+        cardinality: {
+          ...fileConfig.cardinality,
+          ...parseCardinalitySpecs(opts.cardinality),
+        },
+        nullRates: {
+          ...fileConfig.nullRates,
+          ...parseNullRateSpecs(opts.nullRate),
+        },
+        anonymize: [...(fileConfig.anonymize ?? []), ...opts.anonymize],
+        preserve: [...(fileConfig.preserve ?? []), ...opts.preserve],
+        link: [...(fileConfig.link ?? []), ...parseLinkGroups(opts.link)],
+        secret: opts.secret ?? fileConfig.secret,
+      };
+
+      // Validate the temporal window and locale up front so a bad --since/--until
+      // or --locale fails before we connect (the dry-run plan path never reaches
+      // streamData, where the locale would otherwise first be resolved).
+      try {
+        temporalWindow(config);
+        resolveLocale(config.locale);
+        validateNullRates(config.nullRates);
+        validateCardinality(config.cardinality);
+      } catch (err) {
+        program.error(err instanceof Error ? err.message : String(err));
+      }
+
+      // --format selects how the --out/--print path serializes rows. `sql` is the
+      // default and unchanged; `csv`/`ndjson` write one file per table into an
+      // --out directory, so the destinations that only SQL can reach (stdout, a
+      // live DB via direct insert or --to, and TRUNCATE) are rejected up front.
+      // A dry-run writes nothing, so it skips these destination checks.
+      const format: OutputFormat = config.format ?? "sql";
+      if (config.format !== undefined && !isOutputFormat(config.format)) {
+        program.error(
+          `Unknown --format '${config.format}'. Use ${OUTPUT_FORMATS.join(", ")}.`,
+        );
+      }
+      if (format !== "sql" && !opts.dryRun) {
+        if (opts.print)
           program.error(
-            `--on-conflict only applies to --format sql; it rewrites the generated INSERTs.`,
+            `--format ${format} writes one file per table; use --out <dir> instead of --print.`,
+          );
+        if (opts.to)
+          program.error(
+            `--format ${format} writes files, not to a database; use --out <dir> instead of --to.`,
+          );
+        if (opts.truncate)
+          program.error(
+            `--truncate has no meaning with --format ${format}; it only writes files.`,
+          );
+        if (!opts.out)
+          program.error(
+            `--format ${format} needs an output directory: pass --out <dir>.`,
+          );
+      }
+
+      // --on-conflict only rewrites the generated INSERTs, so it needs the SQL
+      // script path: --format sql to a file (--out) or stdout (--print), never a
+      // direct/`--to` live insert (COPY/streamed INSERTs have no skip form here)
+      // or a csv/ndjson file. A dry-run writes nothing, so it skips these checks.
+      if (config.onConflict !== undefined) {
+        if (!["skip", "update"].includes(config.onConflict)) {
+          program.error(
+            `Unknown --on-conflict '${config.onConflict}'. Use skip or update.`,
           );
         }
-        if (opts.to) {
-          program.error(
-            `--on-conflict produces a re-runnable SQL script; it can't insert into a --to database.`,
-          );
-        }
-        if (!opts.out && !opts.print) {
-          program.error(
-            `--on-conflict produces a re-runnable SQL script; write it with --out <file> or --print instead of inserting directly.`,
-          );
-        }
-      }
-    }
-
-    // Offline mode: build the schema from a DDL file and emit SQL with no DB.
-    // Only the file-output path makes sense here — append/subset/direct-insert
-    // all need a live database — so those combinations are rejected up front.
-    if (offline) {
-      await runOffline(opts, config, format);
-      return;
-    }
-
-    const dialect = dialectFor(connStr);
-    const schemas: string[] = opts.schema ?? dialect.defaultSchemas(connStr);
-    const client = await dialect.connect(connStr);
-    try {
-      const schema = await dialect.introspect(client, schemas);
-      if (schema.tables.size === 0) {
-        program.error(
-          `No tables found in schema(s): ${schemas.join(", ") || "(none)"}`,
-        );
-      }
-      const { order, cyclic } = topoSort(schema);
-
-      const isSubset = opts.subset.length > 0;
-      const isAppend = !!opts.append;
-      if (isAppend && isSubset) {
-        program.error(
-          "--append and --subset are separate modes; use one at a time.",
-        );
-      }
-      if (isAppend && opts.truncate) {
-        program.error(
-          "--append adds rows to existing data; --truncate would delete it first.",
-        );
-      }
-      if (opts.scan && !isSubset) {
-        program.error(
-          "--scan reports what --subset would do; pass --subset <spec...> too.",
-        );
-      }
-      if (opts.json && !opts.scan) {
-        program.error("--json only applies to --scan.");
-      }
-      if (opts.sample && !isSubset) {
-        program.error(
-          "--sample selects random --subset root rows; pass --subset <spec...> too.",
-        );
-      }
-      if (opts.children && !isSubset) {
-        program.error(
-          "--children pulls child rows referencing the subset; pass --subset <spec...> too.",
-        );
-      }
-      if (opts.scrubKeys && !isSubset) {
-        program.error(
-          "--scrub-keys anonymizes PII key columns in a subset; pass --subset <spec...> too.",
-        );
-      }
-      const wheres = parseWhereSpecs(opts.where);
-      if (Object.keys(wheres).length > 0) {
-        if (!isSubset) {
-          program.error(
-            "--where filters --subset root rows; pass --subset <spec...> too.",
-          );
-        }
-        const rootTables = new Set(Object.keys(parseRowSpecs(opts.subset)));
-        for (const table of Object.keys(wheres)) {
-          if (!rootTables.has(table)) {
+        if (!opts.dryRun) {
+          if (format !== "sql") {
             program.error(
-              `--where table "${table}" is not a --subset root; --where only filters root tables.`,
+              `--on-conflict only applies to --format sql; it rewrites the generated INSERTs.`,
             );
           }
-        }
-      }
-      const sampleRates = parseSampleRateSpecs(opts.sampleRate);
-      if (Object.keys(sampleRates).length > 0) {
-        if (!isSubset) {
-          program.error(
-            "--sample-rate samples --subset root rows; pass --subset <spec...> too.",
-          );
-        }
-        const rootTables = new Set(Object.keys(parseRowSpecs(opts.subset)));
-        for (const table of Object.keys(sampleRates)) {
-          if (!rootTables.has(table)) {
+          if (opts.to) {
             program.error(
-              `--sample-rate table "${table}" is not a --subset root; --sample-rate only samples root tables.`,
+              `--on-conflict produces a re-runnable SQL script; it can't insert into a --to database.`,
+            );
+          }
+          if (!opts.out && !opts.print) {
+            program.error(
+              `--on-conflict produces a re-runnable SQL script; write it with --out <file> or --print instead of inserting directly.`,
             );
           }
         }
       }
 
-      // Profiling learns the shape of the existing data and folds it into the
-      // config *beneath* the user's explicit flags. --profile-out dumps that
-      // derived config and exits; plain --profile continues into generation
-      // (composes with --append). It's incompatible with --subset, which copies
-      // real rows rather than generating fresh ones.
-      if ((opts.profile || opts.profileOut) && isSubset) {
-        program.error(
-          "--profile generates fresh rows shaped like existing data; --subset copies real rows. Use one at a time.",
-        );
+      // Offline mode: build the schema from a DDL file and emit SQL with no DB.
+      // Only the file-output path makes sense here — append/subset/direct-insert
+      // all need a live database — so those combinations are rejected up front.
+      if (offline) {
+        await runOffline(program, opts, config, format);
+        return;
       }
-      if (opts.profile || opts.profileOut) {
-        const { config: profiled, summary } = await buildProfile(
-          schema,
-          order,
-          config,
-          dialect.createProfiler(client),
-        );
-        if (opts.profileOut) {
-          await writeFile(
-            opts.profileOut,
-            JSON.stringify(profiled, null, 2) + "\n",
-            "utf8",
+
+      const dialect = dialectFor(connStr);
+      const schemas: string[] = opts.schema ?? dialect.defaultSchemas(connStr);
+      const client = await dialect.connect(connStr);
+      try {
+        const schema = await dialect.introspect(client, schemas);
+        if (schema.tables.size === 0) {
+          program.error(
+            `No tables found in schema(s): ${schemas.join(", ") || "(none)"}`,
           );
-          console.error(formatProfileSummary(summary));
-          console.error(`\n✓ Wrote derived config to ${opts.profileOut}`);
+        }
+        const { order, cyclic } = topoSort(schema);
+
+        const isSubset = opts.subset.length > 0;
+        const isAppend = !!opts.append;
+        if (isAppend && isSubset) {
+          program.error(
+            "--append and --subset are separate modes; use one at a time.",
+          );
+        }
+        if (isAppend && opts.truncate) {
+          program.error(
+            "--append adds rows to existing data; --truncate would delete it first.",
+          );
+        }
+        if (opts.scan && !isSubset) {
+          program.error(
+            "--scan reports what --subset would do; pass --subset <spec...> too.",
+          );
+        }
+        if (opts.json && !opts.scan) {
+          program.error("--json only applies to --scan.");
+        }
+        if (opts.sample && !isSubset) {
+          program.error(
+            "--sample selects random --subset root rows; pass --subset <spec...> too.",
+          );
+        }
+        if (opts.children && !isSubset) {
+          program.error(
+            "--children pulls child rows referencing the subset; pass --subset <spec...> too.",
+          );
+        }
+        if (opts.scrubKeys && !isSubset) {
+          program.error(
+            "--scrub-keys anonymizes PII key columns in a subset; pass --subset <spec...> too.",
+          );
+        }
+        const wheres = parseWhereSpecs(opts.where);
+        if (Object.keys(wheres).length > 0) {
+          if (!isSubset) {
+            program.error(
+              "--where filters --subset root rows; pass --subset <spec...> too.",
+            );
+          }
+          const rootTables = new Set(Object.keys(parseRowSpecs(opts.subset)));
+          for (const table of Object.keys(wheres)) {
+            if (!rootTables.has(table)) {
+              program.error(
+                `--where table "${table}" is not a --subset root; --where only filters root tables.`,
+              );
+            }
+          }
+        }
+        const sampleRates = parseSampleRateSpecs(opts.sampleRate);
+        if (Object.keys(sampleRates).length > 0) {
+          if (!isSubset) {
+            program.error(
+              "--sample-rate samples --subset root rows; pass --subset <spec...> too.",
+            );
+          }
+          const rootTables = new Set(Object.keys(parseRowSpecs(opts.subset)));
+          for (const table of Object.keys(sampleRates)) {
+            if (!rootTables.has(table)) {
+              program.error(
+                `--sample-rate table "${table}" is not a --subset root; --sample-rate only samples root tables.`,
+              );
+            }
+          }
+        }
+
+        // Profiling learns the shape of the existing data and folds it into the
+        // config *beneath* the user's explicit flags. --profile-out dumps that
+        // derived config and exits; plain --profile continues into generation
+        // (composes with --append). It's incompatible with --subset, which copies
+        // real rows rather than generating fresh ones.
+        if ((opts.profile || opts.profileOut) && isSubset) {
+          program.error(
+            "--profile generates fresh rows shaped like existing data; --subset copies real rows. Use one at a time.",
+          );
+        }
+        if (opts.profile || opts.profileOut) {
+          const { config: profiled, summary } = await buildProfile(
+            schema,
+            order,
+            config,
+            dialect.createProfiler(client),
+          );
+          if (opts.profileOut) {
+            await writeFile(
+              opts.profileOut,
+              JSON.stringify(profiled, null, 2) + "\n",
+              "utf8",
+            );
+            console.error(formatProfileSummary(summary));
+            console.error(`\n✓ Wrote derived config to ${opts.profileOut}`);
+            return;
+          }
+          mergeProfile(config, profiled);
+          console.error(formatProfileSummary(summary) + "\n");
+        }
+
+        // Append grows only the tables named via --rows; nothing to do otherwise.
+        let appendCtx: AppendContext | undefined;
+        if (isAppend) {
+          if (appendTargets(schema, config).size === 0) {
+            program.error(
+              "--append needs at least one table to grow: pass --rows <table>=<n>.",
+            );
+          }
+          appendCtx = await planAppend(
+            schema,
+            order,
+            config,
+            dialect.createRowFetcher(client),
+          );
+        }
+
+        // Some column types have no safe generated literal. If a NOT NULL column
+        // of such a type has no default/override and no FK to draw from, the INSERT
+        // would fail mid-transaction — report it up front instead. Subset mode
+        // passes real values through verbatim, so it's exempt.
+        if (!isSubset) {
+          const skipSet = new Set(config.skip ?? []);
+          const genKeys = isAppend
+            ? [...appendCtx!.generate]
+            : order
+                .filter(
+                  (t) =>
+                    !skipSet.has(t.name) &&
+                    !skipSet.has(t.key) &&
+                    rowCount(t, config) > 0,
+                )
+                .map((t) => t.key);
+          const unsupported = requiredUnsupportedColumns(
+            schema,
+            config,
+            genKeys,
+          );
+          if (unsupported.length > 0) {
+            const lines = unsupported.map(
+              (c) => `  ${c.table}.${c.column} (${c.udtName})`,
+            );
+            const first = unsupported[0];
+            program.error(
+              [
+                `Can't generate a value for ${unsupported.length} NOT NULL column(s) of an unsupported type:`,
+                ...lines,
+                "",
+                "Provide a value and re-run — e.g.:",
+                `  --column ${first.table}.${first.column}=value:<literal>`,
+                "(a faker path or values:a,b,c work too), or make the column nullable / give it a DB default.",
+              ].join("\n"),
+            );
+          }
+        }
+
+        const batchSize: number | undefined = config.batchSize;
+        const verb = isSubset ? "Subset" : isAppend ? "Appended" : "Generated";
+
+        // --scrub-keys: fold the PII key columns the leak warning would name into
+        // the effective anonymize set. Done before --scan and the warning so both
+        // reflect it; the group-remap path in anonymizeAll then scrubs each join
+        // key consistently (FKs still resolve), and privateKeyColumns — which
+        // excludes forced columns — comes back empty so the warning self-suppresses.
+        if (isSubset && opts.scrubKeys) {
+          config.anonymize = scrubKeysConfig(schema, config).anonymize;
+        }
+
+        // --scan: a schema-level privacy report. Introspection already ran (the
+        // only source access scan needs); classify every column and exit without
+        // reading rows or writing anywhere. The report itself flags PII copied
+        // verbatim, so the separate warning below is redundant here.
+        if (opts.scan) {
+          const report = scanSubset(schema, config);
+          process.stdout.write(
+            (opts.json
+              ? JSON.stringify(report, null, 2)
+              : formatScanReport(report)) + "\n",
+          );
           return;
         }
-        mergeProfile(config, profiled);
-        console.error(formatProfileSummary(summary) + "\n");
-      }
 
-      // Append grows only the tables named via --rows; nothing to do otherwise.
-      let appendCtx: AppendContext | undefined;
-      if (isAppend) {
-        if (appendTargets(schema, config).size === 0) {
-          program.error(
-            "--append needs at least one table to grow: pass --rows <table>=<n>.",
-          );
-        }
-        appendCtx = await planAppend(
-          schema,
-          order,
-          config,
-          dialect.createRowFetcher(client),
-        );
-      }
-
-      // Some column types have no safe generated literal. If a NOT NULL column
-      // of such a type has no default/override and no FK to draw from, the INSERT
-      // would fail mid-transaction — report it up front instead. Subset mode
-      // passes real values through verbatim, so it's exempt.
-      if (!isSubset) {
-        const skipSet = new Set(config.skip ?? []);
-        const genKeys = isAppend
-          ? [...appendCtx!.generate]
-          : order
-              .filter(
-                (t) =>
-                  !skipSet.has(t.name) &&
-                  !skipSet.has(t.key) &&
-                  rowCount(t, config) > 0,
-              )
-              .map((t) => t.key);
-        const unsupported = requiredUnsupportedColumns(schema, config, genKeys);
-        if (unsupported.length > 0) {
-          const lines = unsupported.map(
-            (c) => `  ${c.table}.${c.column} (${c.udtName})`,
-          );
-          const first = unsupported[0];
-          program.error(
-            [
-              `Can't generate a value for ${unsupported.length} NOT NULL column(s) of an unsupported type:`,
-              ...lines,
-              "",
-              "Provide a value and re-run — e.g.:",
-              `  --column ${first.table}.${first.column}=value:<literal>`,
-              "(a faker path or values:a,b,c work too), or make the column nullable / give it a DB default.",
-            ].join("\n"),
-          );
-        }
-      }
-
-      const batchSize: number | undefined = config.batchSize;
-      const verb = isSubset ? "Subset" : isAppend ? "Appended" : "Generated";
-
-      // --scrub-keys: fold the PII key columns the leak warning would name into
-      // the effective anonymize set. Done before --scan and the warning so both
-      // reflect it; the group-remap path in anonymizeAll then scrubs each join
-      // key consistently (FKs still resolve), and privateKeyColumns — which
-      // excludes forced columns — comes back empty so the warning self-suppresses.
-      if (isSubset && opts.scrubKeys) {
-        config.anonymize = scrubKeysConfig(schema, config).anonymize;
-      }
-
-      // --scan: a schema-level privacy report. Introspection already ran (the
-      // only source access scan needs); classify every column and exit without
-      // reading rows or writing anywhere. The report itself flags PII copied
-      // verbatim, so the separate warning below is redundant here.
-      if (opts.scan) {
-        const report = scanSubset(schema, config);
-        process.stdout.write(
-          (opts.json
-            ? JSON.stringify(report, null, 2)
-            : formatScanReport(report)) + "\n",
-        );
-        return;
-      }
-
-      // Warn (don't block) when a preserved join key is itself PII: keys are
-      // copied verbatim to keep joins valid, so its real values would leak.
-      if (isSubset) {
-        const leaky = privateKeyColumns(schema, config);
-        if (leaky.length > 0) {
-          console.error(
-            [
-              "⚠ These key columns look like PII and will be copied UNCHANGED",
-              "  (keys are preserved so joins stay valid):",
-              ...leaky.map(
-                (c) => `      ${c.table}.${c.column} (${c.category})`,
-              ),
-              "  To scrub them consistently across every join, add:",
-              `      --anonymize ${leaky.map((c) => `${c.table}.${c.column}`).join(" ")}`,
-            ].join("\n"),
-          );
-        }
-      }
-
-      const subsetData = async () =>
-        anonymizeAll(
-          schema,
-          order,
-          await collectSubset(
-            schema,
-            parseRowSpecs(opts.subset),
-            dialect.createRowFetcher(client),
-            wheres,
-            !!opts.sample,
-            !!opts.children,
-            sampleRates,
-            config.seed,
-          ),
-          config,
-        );
-
-      if (opts.dryRun) {
+        // Warn (don't block) when a preserved join key is itself PII: keys are
+        // copied verbatim to keep joins valid, so its real values would leak.
         if (isSubset) {
-          // Reading (SELECT) the source is safe; nothing is written. The preview
-          // shows the real closed-over counts and the actual anonymized values.
-          console.error(
-            formatPlan(buildSubsetPlan(await subsetData(), cyclic), {
-              subset: true,
-            }),
-          );
-        } else if (isAppend) {
-          // Existing rows were read (SELECT) to build the FK pools; nothing written.
-          console.error(
-            formatPlan(
-              buildAppendPlan(schema, order, cyclic, config, appendCtx!),
-              { append: true },
-            ),
-          );
-        } else {
-          console.error(formatPlan(buildPlan(schema, order, cyclic, config)));
+          const leaky = privateKeyColumns(schema, config);
+          if (leaky.length > 0) {
+            console.error(
+              [
+                "⚠ These key columns look like PII and will be copied UNCHANGED",
+                "  (keys are preserved so joins stay valid):",
+                ...leaky.map(
+                  (c) => `      ${c.table}.${c.column} (${c.category})`,
+                ),
+                "  To scrub them consistently across every join, add:",
+                `      --anonymize ${leaky.map((c) => `${c.table}.${c.column}`).join(" ")}`,
+              ].join("\n"),
+            );
+          }
         }
-        return;
-      }
 
-      if (opts.out || opts.print) {
-        // File/stdout output needs the full dataset in memory to assemble it.
-        const data = isSubset
-          ? await subsetData()
-          : buildData(schema, order, cyclic, config, appendCtx);
-        await writeMaterialized(
-          data,
-          format,
-          opts,
-          dialect,
-          verb,
-          cyclic,
-          config.onConflict,
-        );
-      } else if (isSubset) {
-        // Never write anonymized rows back into the source; require an explicit target.
-        if (!opts.to) {
-          program.error(
-            "--subset needs a destination: pass --to <connection>, --out <file>, or --print.",
+        const subsetData = async () =>
+          anonymizeAll(
+            schema,
+            order,
+            await collectSubset(
+              schema,
+              parseRowSpecs(opts.subset),
+              dialect.createRowFetcher(client),
+              wheres,
+              !!opts.sample,
+              !!opts.children,
+              sampleRates,
+              config.seed,
+            ),
+            config,
           );
+
+        if (opts.dryRun) {
+          if (isSubset) {
+            // Reading (SELECT) the source is safe; nothing is written. The preview
+            // shows the real closed-over counts and the actual anonymized values.
+            console.error(
+              formatPlan(buildSubsetPlan(await subsetData(), cyclic), {
+                subset: true,
+              }),
+            );
+          } else if (isAppend) {
+            // Existing rows were read (SELECT) to build the FK pools; nothing written.
+            console.error(
+              formatPlan(
+                buildAppendPlan(schema, order, cyclic, config, appendCtx!),
+                { append: true },
+              ),
+            );
+          } else {
+            console.error(formatPlan(buildPlan(schema, order, cyclic, config)));
+          }
+          return;
         }
-        const data = await subsetData();
-        const targetDialect = dialectFor(opts.to);
-        const target = await targetDialect.connect(opts.to);
-        try {
-          const inserted = await targetDialect.insertData(target, data, {
-            truncate: opts.truncate,
+
+        if (opts.out || opts.print) {
+          // File/stdout output needs the full dataset in memory to assemble it.
+          const data = isSubset
+            ? await subsetData()
+            : buildData(schema, order, cyclic, config, appendCtx);
+          await writeMaterialized(
+            data,
+            format,
+            opts,
+            dialect,
+            verb,
+            cyclic,
+            config.onConflict,
+          );
+        } else if (isSubset) {
+          // Never write anonymized rows back into the source; require an explicit target.
+          if (!opts.to) {
+            program.error(
+              "--subset needs a destination: pass --to <connection>, --out <file>, or --print.",
+            );
+          }
+          const data = await subsetData();
+          const targetDialect = dialectFor(opts.to);
+          const target = await targetDialect.connect(opts.to);
+          try {
+            const inserted = await targetDialect.insertData(target, data, {
+              truncate: opts.truncate,
+              batchSize,
+            });
+            console.error(summary(counts(data), cyclic, verb));
+            console.error(
+              `\n✓ Inserted ${inserted} rows across ${data.length} tables into --to target`,
+            );
+          } finally {
+            await target.end();
+          }
+        } else {
+          // Direct insert (from-scratch or append): stream generation straight into
+          // the sink so we never hold the whole dataset in memory. Append writes only
+          // the grown tables and never truncates.
+          const skip = new Set(config.skip ?? []);
+          const tables = order.filter(
+            (t) =>
+              !skip.has(t.name) &&
+              !skip.has(t.key) &&
+              (!appendCtx || appendCtx.generate.has(t.key)),
+          );
+          const sink = dialect.createSink(client, {
+            truncate: isAppend ? false : opts.truncate,
+            tables,
             batchSize,
           });
-          console.error(summary(counts(data), cyclic, verb));
-          console.error(
-            `\n✓ Inserted ${inserted} rows across ${data.length} tables into --to target`,
+          const stats = await generateInto(
+            schema,
+            order,
+            cyclic,
+            config,
+            sink,
+            batchSize,
+            appendCtx,
           );
-        } finally {
-          await target.end();
+          const filled = stats.filter((s) => s.rows > 0);
+          console.error(summary(counts(stats), cyclic, verb));
+          console.error(
+            `\n✓ Inserted ${sink.inserted} rows across ${filled.length} tables`,
+          );
         }
-      } else {
-        // Direct insert (from-scratch or append): stream generation straight into
-        // the sink so we never hold the whole dataset in memory. Append writes only
-        // the grown tables and never truncates.
-        const skip = new Set(config.skip ?? []);
-        const tables = order.filter(
-          (t) =>
-            !skip.has(t.name) &&
-            !skip.has(t.key) &&
-            (!appendCtx || appendCtx.generate.has(t.key)),
-        );
-        const sink = dialect.createSink(client, {
-          truncate: isAppend ? false : opts.truncate,
-          tables,
-          batchSize,
-        });
-        const stats = await generateInto(
-          schema,
-          order,
-          cyclic,
-          config,
-          sink,
-          batchSize,
-          appendCtx,
-        );
-        const filled = stats.filter((s) => s.rows > 0);
-        console.error(summary(counts(stats), cyclic, verb));
-        console.error(
-          `\n✓ Inserted ${sink.inserted} rows across ${filled.length} tables`,
-        );
+      } finally {
+        await client.end();
       }
-    } finally {
-      await client.end();
-    }
-  });
+    });
+
+  return program;
+}
 
 /**
  * `--schema-file` path: parse a DDL file into a Schema and emit generated SQL
@@ -675,6 +694,7 @@ program
  * live connection (append, subset, direct insert into `--to`/the source).
  */
 async function runOffline(
+  program: Command,
   opts: any,
   config: Config,
   format: OutputFormat,
@@ -878,7 +898,28 @@ function summary(
   return [`${verb}:`, ...lines].join("\n");
 }
 
-program.parseAsync().catch((err) => {
-  console.error(`\n✗ ${err instanceof Error ? err.message : err}`);
-  process.exit(1);
-});
+/**
+ * Parse and run the CLI. Pass `exitOverride` so commander throws a
+ * CommanderError (with `.code` and message) instead of calling `process.exit` —
+ * tests drive the whole flag surface this way, no subprocess required. Args are
+ * taken `from: "user"`, so callers pass a bare argv array (no node/script prefix).
+ */
+export async function run(
+  argv: string[],
+  opts: { exitOverride?: boolean } = {},
+): Promise<void> {
+  const program = buildProgram();
+  if (opts.exitOverride) program.exitOverride();
+  await program.parseAsync(argv, { from: "user" });
+}
+
+// Only run the CLI when this module is the process entry point; importing it
+// (e.g. from tests) must stay side-effect-free.
+const isMain =
+  !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  run(process.argv.slice(2)).catch((err) => {
+    console.error(`\n✗ ${err instanceof Error ? err.message : err}`);
+    process.exit(1);
+  });
+}
