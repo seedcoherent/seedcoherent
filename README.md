@@ -76,6 +76,18 @@ honestly, where `seedcoherent` fits and where something else is the better call:
 - [vs. Mockaroo](./docs/comparisons/vs-mockaroo.md) — whole-schema generation vs. a table at a time
 - [vs. hand-rolled `pg_dump` sampling](./docs/comparisons/vs-pg-dump.md) — `--subset` + `--anonymize` vs. a DIY pipeline
 
+## Recipes for your stack
+
+Already inside an ORM? seedcoherent slots in right after your migrations — the
+[recipes](./docs/recipes/) show the copy-paste command and where to hang it off
+your existing seed step:
+
+- [Prisma](./docs/recipes/prisma.md) — point `prisma db seed` at seedcoherent
+- [Drizzle](./docs/recipes/drizzle.md) — a `db:seed` script after `drizzle-kit migrate`
+- [Django](./docs/recipes/django.md) — seed the database `migrate` just built
+- [Rails](./docs/recipes/rails.md) — call it from `db/seeds.rb`
+- [Supabase](./docs/recipes/supabase.md) — generate `supabase/seed.sql`, auto-loaded by `supabase db reset`
+
 ## What it does
 
 | Capability | Supported | Notes |
