@@ -87,6 +87,7 @@ your existing seed step:
 - [Django](./docs/recipes/django.md) — seed the database `migrate` just built
 - [Rails](./docs/recipes/rails.md) — call it from `db/seeds.rb`
 - [Supabase](./docs/recipes/supabase.md) — generate `supabase/seed.sql`, auto-loaded by `supabase db reset`
+- [CI & ephemeral databases](./docs/recipes/ci.md) — GitHub Actions, docker-compose, Testcontainers
 
 ## What it does
 

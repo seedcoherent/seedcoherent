@@ -23,6 +23,7 @@ hook differ per stack:
 - [Django](./django.md) — seed the DB `migrate` just built (Node alongside Python)
 - [Rails](./rails.md) — call it from `db/seeds.rb`, run via `rails db:seed`
 - [Supabase](./supabase.md) — generate `supabase/seed.sql`, auto-loaded by `supabase db reset`
+- [CI & ephemeral databases](./ci.md) — GitHub Actions, docker-compose, Testcontainers
 
 ## At a glance
 
@@ -33,6 +34,7 @@ hook differ per stack:
 | Django | PG · MySQL · SQLite | `make seed` / manage target | insert live or `-o seed.sql` |
 | Rails | PG · MySQL · SQLite | `db/seeds.rb` → `rails db:seed` | insert live |
 | Supabase | PG | `supabase/seed.sql` → `supabase db reset` | emit `-o supabase/seed.sql` |
+| CI / ephemeral DB | PG · MySQL · SQL Server | `npx seedcoherent` after migrate step | insert live, `--seed 42` |
 
 Two flags worth knowing for every recipe:
 
