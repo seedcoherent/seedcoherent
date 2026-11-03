@@ -211,7 +211,12 @@ test("new rows don't collide with an existing UNIQUE value in the target", async
   ];
   const config: Config = { rows: { flags: 2 }, seed: 11 };
   const { order, cyclic } = topoSort(s);
-  const ctx = await planAppend(s, order, config, new FakeFetcher({ flags: existing }));
+  const ctx = await planAppend(
+    s,
+    order,
+    config,
+    new FakeFetcher({ flags: existing }),
+  );
   const rows = buildData(s, order, cyclic, config, ctx)[0].rows;
 
   const newCodes = rows.map((r) => r.code);
