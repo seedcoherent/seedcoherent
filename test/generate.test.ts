@@ -2,11 +2,16 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildData, generateInto, CollectSink } from "../src/generate.js";
+import {
+  buildData,
+  generateInto,
+  CollectSink,
+  unroutablePartition,
+} from "../src/generate.js";
 import { toSql } from "../src/emit.js";
 import { topoSort } from "../src/graph.js";
 import { col, fk, idCol, schema, table } from "./helpers.js";
-import type { Config, Schema } from "../src/types.js";
+import type { Config, Schema, TableInfo } from "../src/types.js";
 
 /** Introspect-free build: topo-sort then generate. */
 function build(s: Schema, config: Config) {
@@ -154,6 +159,88 @@ test("row count is capped when the unique domain is exhausted", () => {
   assert.deepEqual([...labels].sort(), ["a", "b", "c"]);
 });
 
+test("a short table (exhausted unique domain) warns on stderr", () => {
+  const tags = table("tags", {
+    columns: [col("label", { udtName: "text" })],
+    uniques: [["label"]],
+  });
+  const original = process.stderr.write.bind(process.stderr);
+  let captured = "";
+  (process.stderr as NodeJS.WriteStream).write = ((s: string) => {
+    captured += s;
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    build(schema(tags), {
+      rows: { tags: 10 },
+      columns: { "tags.label": { values: ["a", "b", "c"] } },
+      seed: 1,
+    });
+  } finally {
+    process.stderr.write = original;
+  }
+  assert.match(captured, /public\.tags produced 3 of 10/);
+});
+
+test("unroutablePartition flags best-effort partition keys, not safe ones", () => {
+  const base = table("events", {
+    columns: [idCol(), col("tenant", { udtName: "int4" })],
+    primaryKey: ["id"],
+  });
+  const withPart = (part: NonNullable<TableInfo["partition"]>): TableInfo => ({
+    ...base,
+    partition: part,
+  });
+
+  // Safe: single-column RANGE with bounds, or a DEFAULT partition present.
+  assert.equal(
+    unroutablePartition(
+      withPart({
+        strategy: "range",
+        keyColumns: ["tenant"],
+        hasDefault: false,
+        ranges: [{ from: "0", to: "100" }],
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    unroutablePartition(
+      withPart({
+        strategy: "hash",
+        keyColumns: ["tenant"],
+        hasDefault: true,
+      }),
+    ),
+    null,
+  );
+
+  // Flagged: hash, expression (no key columns), multi-column, unparseable.
+  assert.match(
+    unroutablePartition(
+      withPart({ strategy: "hash", keyColumns: ["tenant"], hasDefault: false }),
+    ) ?? "",
+    /hash/,
+  );
+  assert.match(
+    unroutablePartition(
+      withPart({ strategy: "range", keyColumns: [], hasDefault: false }),
+    ) ?? "",
+    /expression/,
+  );
+  assert.match(
+    unroutablePartition(
+      withPart({
+        strategy: "range",
+        keyColumns: ["tenant", "id"],
+        hasDefault: false,
+        ranges: [{ from: "0", to: "1" }],
+      }),
+    ) ?? "",
+    /multi-column/,
+  );
+});
+
 test("self-referential FK points at an existing row or null", () => {
   const employees = table("employees", {
     columns: [idCol(), col("manager_id", { udtName: "int4", nullable: true })],
@@ -168,6 +255,70 @@ test("self-referential FK points at an existing row or null", () => {
       assert.ok(ids.has(r.manager_id), `manager_id ${r.manager_id} has no row`);
     }
   }
+});
+
+test("self-referential NOT NULL FK with a uuid PK points row 0 at itself", () => {
+  // The first row has no earlier row and no synthetic integer id to peek, so it
+  // must reference its own (generated) PK rather than emit NULL.
+  const nodes = table("nodes", {
+    columns: [
+      col("id", { udtName: "uuid" }),
+      col("parent_id", { udtName: "uuid", nullable: false }),
+    ],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["parent_id"], "nodes", ["id"])],
+  });
+  const data = build(schema(nodes), { rows: { nodes: 10 }, seed: 5 });
+  const rows = rowsFor(data, "public.nodes");
+  const ids = new Set(rows.map((r) => r.id));
+  for (const r of rows) {
+    assert.notEqual(r.parent_id, null, "parent_id must never be NULL");
+    assert.ok(ids.has(r.parent_id), `parent_id ${r.parent_id} has no row`);
+  }
+  assert.equal(rows[0].parent_id, rows[0].id, "row 0 should reference itself");
+});
+
+test("an unsatisfiable NOT NULL FK cycle fails fast", () => {
+  // a.b_id → b and b.a_id → a, both NOT NULL: whichever is generated first has
+  // no parent rows, so this is unsatisfiable and must error up front.
+  const a = table("a", {
+    columns: [idCol(), col("b_id", { udtName: "int4", nullable: false })],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["b_id"], "b", ["id"])],
+  });
+  const b = table("b", {
+    columns: [idCol(), col("a_id", { udtName: "int4", nullable: false })],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["a_id"], "a", ["id"])],
+  });
+  assert.throws(
+    () => build(schema(a, b), { rows: { a: 5, b: 5 }, seed: 1 }),
+    /NOT NULL foreign key|NOT NULL FK cycle/,
+  );
+});
+
+test("a NOT NULL FK to a zero-row parent fails fast", () => {
+  assert.throws(
+    () =>
+      build(usersAndOrders(), {
+        rows: { users: 0, orders: 10 },
+        seed: 1,
+      }),
+    /parent has no rows/,
+  );
+});
+
+test("a nullable self-referential FK cycle still generates", () => {
+  // The manager_id cycle is nullable, so it must not trip the fail-fast guard.
+  const employees = table("employees", {
+    columns: [idCol(), col("manager_id", { udtName: "int4", nullable: true })],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["manager_id"], "employees", ["id"])],
+  });
+  assert.equal(
+    rowsFor(build(schema(employees), { rows: { employees: 3 }, seed: 1 }), "public.employees").length,
+    3,
+  );
 });
 
 test("skipped tables are omitted from the output entirely", () => {
@@ -266,6 +417,68 @@ test("length CHECK forces a minimum string length", () => {
       (r.token as string).length >= 12,
       `token too short: "${r.token}"`,
     );
+  }
+});
+
+test("IN + range CHECK draws only in-range members", () => {
+  // rating IN (1..5) AND rating <= 3 must never emit 4 or 5.
+  const t = table("reviews", {
+    columns: [idCol(), col("rating", { udtName: "int4" })],
+    primaryKey: ["id"],
+    checks: [
+      {
+        expr: "((rating = ANY (ARRAY[1, 2, 3, 4, 5])) AND (rating <= 3))",
+      },
+    ],
+  });
+  const rows = rowsFor(
+    build(schema(t), { rows: { reviews: 50 }, seed: 7 }),
+    "public.reviews",
+  );
+  for (const r of rows) {
+    const v = r.rating as number;
+    assert.ok([1, 2, 3].includes(v), `rating ${v} should be 1..3`);
+  }
+});
+
+test("a recognized-but-unsamplable regex CHECK still matches", () => {
+  // `\d` is recognized by the parser but the mini-sampler can't build it, so
+  // generation must retry-filter against the real regex, not emit free text.
+  const t = table("skus", {
+    columns: [idCol(), col("code", { udtName: "text" })],
+    primaryKey: ["id"],
+    checks: [{ expr: "(code ~ '^[A-Z]{2}\\d{4}$'::text)" }],
+  });
+  const rows = rowsFor(
+    build(schema(t), { rows: { skus: 20 }, seed: 8 }),
+    "public.skus",
+  );
+  const re = /^[A-Z]{2}\d{4}$/;
+  for (const r of rows)
+    assert.ok(re.test(r.code as string), `code "${r.code}" fails pattern`);
+});
+
+test("numeric CHECK lower bound can't overflow numeric(p, s)", () => {
+  // price >= 0 with an open-ended span must stay within numeric(4, 2) (< 100).
+  const t = table("items", {
+    columns: [
+      idCol(),
+      col("price", {
+        udtName: "numeric",
+        numericPrecision: 4,
+        numericScale: 2,
+      }),
+    ],
+    primaryKey: ["id"],
+    checks: [{ expr: "(price >= (0)::numeric)" }],
+  });
+  const rows = rowsFor(
+    build(schema(t), { rows: { items: 100 }, seed: 9 }),
+    "public.items",
+  );
+  for (const r of rows) {
+    const v = r.price as number;
+    assert.ok(v >= 0 && v < 100, `price ${v} outside numeric(4,2) range`);
   }
 });
 
