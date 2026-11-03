@@ -232,8 +232,13 @@ export function unsatisfiableRequiredFks(
   const out: UnsatisfiableFk[] = [];
   for (const table of order) {
     if (willGenerate(table)) {
+      // A cardinality-bound FK never emits NULL: the child count is derived from
+      // the parent pool, so an empty parent yields zero children rather than a
+      // row with a NULL foreign key. Exempt that one FK from the check.
+      const cardFk = resolveCardinality(table, config)?.fk;
       for (const fk of table.foreignKeys) {
         if (fk.refTable === table.key) continue; // self-ref handled in-generator
+        if (fk === cardFk) continue; // derived count ⇒ no NULL FK
         if (available.has(fk.refTable)) continue;
         const required = fk.columns.some((cn) => {
           const c = table.columns.find((x) => x.name === cn);

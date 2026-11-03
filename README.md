@@ -893,9 +893,11 @@ What append does differently:
 
 `--append` is its own mode: it can't be combined with `--subset` (a different
 source→target flow) or `--truncate` (which would delete the data you're
-appending to). Uniqueness of *generated* columns is enforced within the run;
-collisions against values already in the table are possible for non-synthetic
-unique keys, the same best-effort guarantee generation gives elsewhere.
+appending to). Uniqueness of *generated* columns is enforced both within the run
+and against the values already in the target: `--append` samples each grown
+table's existing rows and seeds every unique set (the PK included) from them, so
+a newly generated value — including a natural/`uuid`/composite PK — can't collide
+with a row already present.
 
 ## Config file
 
@@ -986,7 +988,11 @@ npm run dev -- postgres://postgres:postgres@localhost:5432/postgres \
    `sqlite_master` on SQLite). On Postgres it also resolves partition strategy +
    bounds and full type detail (arrays, composites, ranges, domains).
 2. **Order** — topologically sorts tables so parents populate before children;
-   cycles and self-references are broken and handled with a deferred pass.
+   cycles and self-references are broken so generation can proceed. A
+   self-referential `NOT NULL` FK points its first row at its own generated key;
+   a cross-table `NOT NULL` FK whose parent can never hold rows when the child
+   generates (a true cycle, or a `--skip`ped / zero-row parent) is reported up
+   front rather than emitted as an invalid `NULL`.
 3. **Infer** — picks a value generator per column from its name and type. The
    introspectors map every dialect's types onto one category set, so inference
    and generation are database-agnostic.
