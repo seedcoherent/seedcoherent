@@ -316,7 +316,10 @@ test("a nullable self-referential FK cycle still generates", () => {
     foreignKeys: [fk(["manager_id"], "employees", ["id"])],
   });
   assert.equal(
-    rowsFor(build(schema(employees), { rows: { employees: 3 }, seed: 1 }), "public.employees").length,
+    rowsFor(
+      build(schema(employees), { rows: { employees: 3 }, seed: 1 }),
+      "public.employees",
+    ).length,
     3,
   );
 });
