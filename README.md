@@ -5,7 +5,7 @@
 [![CI](https://github.com/jajjer/seedcoherent/actions/workflows/ci.yml/badge.svg)](https://github.com/jajjer/seedcoherent/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/seedcoherent.svg)](https://www.npmjs.com/package/seedcoherent)
 [![npm downloads](https://img.shields.io/npm/dm/seedcoherent.svg)](https://www.npmjs.com/package/seedcoherent)
-[![license](https://img.shields.io/npm/l/seedcoherent.svg)](./LICENSE)
+[![license](https://img.shields.io/badge/license-HL3--CORE-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/node/v/seedcoherent.svg)](https://nodejs.org)
 
 ![seedcoherent demo](demo/demo.gif)
@@ -1071,4 +1071,4 @@ exotic (back-references, look-around) is skipped rather than guessed.
 
 ## License
 
-MIT
+[Hippocratic License 3.0 (HL3-CORE)](https://firstdonoharm.dev/)
