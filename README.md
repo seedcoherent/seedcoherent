@@ -2,7 +2,7 @@
 
 **Point it at your Postgres, MySQL, SQLite, or SQL Server schema, get coherent, referentially-correct fake data.**
 
-[![CI](https://github.com/jajjer/seedcoherent/actions/workflows/ci.yml/badge.svg)](https://github.com/jajjer/seedcoherent/actions/workflows/ci.yml)
+[![CI](https://github.com/seedcoherent/seedcoherent/actions/workflows/ci.yml/badge.svg)](https://github.com/seedcoherent/seedcoherent/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/seedcoherent.svg)](https://www.npmjs.com/package/seedcoherent)
 [![npm downloads](https://img.shields.io/npm/dm/seedcoherent.svg)](https://www.npmjs.com/package/seedcoherent)
 [![license](https://img.shields.io/badge/license-HL3--CORE-blue.svg)](./LICENSE)

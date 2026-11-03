@@ -20,11 +20,11 @@
   "author": "Jacob Jensen",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jajjer/seedcoherent.git"
+    "url": "git+https://github.com/seedcoherent/seedcoherent.git"
   },
-  "homepage": "https://github.com/jajjer/seedcoherent#readme",
+  "homepage": "https://github.com/seedcoherent/seedcoherent#readme",
   "bugs": {
-    "url": "https://github.com/jajjer/seedcoherent/issues"
+    "url": "https://github.com/seedcoherent/seedcoherent/issues"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
