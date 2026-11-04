@@ -1,5 +1,8 @@
 /** Shared schema + config types used across introspection, inference, and generation. */
 
+/** Rows per COPY batch / streaming-generation chunk. */
+export const DEFAULT_BATCH_SIZE = 10000;
+
 /**
  * Minimal driver-agnostic query surface. Both the Postgres (`pg`) and MySQL
  * (`mysql2`) clients satisfy this once wrapped, letting introspection and subset

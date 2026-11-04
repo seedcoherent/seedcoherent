@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>seedcoherent playground — paste a schema, see coherent rows</title>
+    <meta
+      name="description"
+      content="Paste a CREATE TABLE schema and instantly see coherent, referentially-correct fake rows — foreign keys resolved, unique constraints held, enums honored. Runs entirely in your browser."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="masthead">
+      <h1>seedcoherent <span>playground</span></h1>
+      <p>
+        Paste a <code>CREATE TABLE</code> schema, pick a dialect, and see
+        coherent, referentially-correct rows — foreign keys resolved, unique
+        constraints held, enums honored. Everything runs in your browser; no
+        database, nothing uploaded.
+      </p>
+    </header>
+
+    <main>
+      <section class="controls">
+        <label class="field field--wide">
+          <span>Schema (DDL)</span>
+          <textarea id="ddl" spellcheck="false" rows="16"></textarea>
+        </label>
+
+        <div class="field-row">
+          <label class="field">
+            <span>Dialect</span>
+            <select id="dialect">
+              <option value="postgres">PostgreSQL</option>
+              <option value="mysql">MySQL</option>
+              <option value="sqlite">SQLite</option>
+              <option value="sqlserver">SQL Server</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Rows per table</span>
+            <input id="rows" type="number" min="1" max="200" value="10" />
+          </label>
+          <label class="field">
+            <span>Seed (optional)</span>
+            <input id="seed" type="number" placeholder="random" />
+          </label>
+          <button id="generate" type="button">Generate</button>
+        </div>
+      </section>
+
+      <div id="notice" class="notice" hidden></div>
+      <div id="output" class="output"></div>
+    </main>
+
+    <footer class="colophon">
+      <p>
+        Powered by
+        <a href="https://github.com/seedcoherent/seedcoherent">seedcoherent</a>.
+        Run it against your own database:
+        <code>npx seedcoherent &lt;connection-string&gt;</code>
+      </p>
+    </footer>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

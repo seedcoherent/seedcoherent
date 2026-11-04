@@ -36,6 +36,9 @@
     "format:check": "prettier --check .",
     "test": "node --test --import tsx test/*.test.ts",
     "demo": "npm run build && vhs demo/demo.tape",
+    "playground:dev": "vite web/playground",
+    "playground:build": "vite build web/playground",
+    "playground:typecheck": "tsc --noEmit -p web/playground/tsconfig.json",
     "benchmark": "npm run build && node scripts/benchmark.mjs",
     "prepublishOnly": "npm run build"
   },
@@ -78,7 +81,8 @@
     "prettier": "^3.9.9",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "typescript-eslint": "^8.71.1"
+    "typescript-eslint": "^8.71.1",
+    "vite": "^6.4.5"
   },
   "engines": {
     "node": ">=20"

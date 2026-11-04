@@ -4,7 +4,16 @@ import eslintConfigPrettier from "eslint-config-prettier";
 import globals from "globals";
 
 export default tseslint.config(
-  { ignores: ["dist", "node_modules", "demo", ".claude", ".context"] },
+  {
+    ignores: [
+      "dist",
+      "web/playground/dist",
+      "node_modules",
+      "demo",
+      ".claude",
+      ".context",
+    ],
+  },
   eslint.configs.recommended,
   // Non-type-checked recommended rules: fast, low-noise on an existing
   // codebase. `tsc --strict` already covers type correctness.
@@ -25,6 +34,14 @@ export default tseslint.config(
         "error",
         { argsIgnorePattern: "^_" },
       ],
+    },
+  },
+  {
+    // The browser playground (web/playground) runs in the browser and a Web
+    // Worker, not Node.
+    files: ["web/playground/**/*.ts"],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.worker },
     },
   },
   // Must come last: switches off formatting rules that would fight Prettier.
