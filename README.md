@@ -7,6 +7,9 @@
 [![npm downloads](https://img.shields.io/npm/dm/seedcoherent.svg)](https://www.npmjs.com/package/seedcoherent)
 [![license](https://img.shields.io/badge/license-HL3--CORE-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/node/v/seedcoherent.svg)](https://nodejs.org)
+[![docs](https://img.shields.io/badge/docs-seedcoherent.github.io-5eead4.svg)](https://seedcoherent.github.io)
+
+📖 **Docs & guides:** [seedcoherent.github.io](https://seedcoherent.github.io) — task-focused guides for seeding Postgres, MySQL, and SQLite, plus comparisons and recipes.
 
 ![seedcoherent demo](demo/demo.gif)
 
