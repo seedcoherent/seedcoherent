@@ -37,6 +37,11 @@ orders, products, and more — with foreign keys, a `UNIQUE`, and `CHECK`-based
 enums) and prints coherent, referentially-correct sample rows. No connection
 string, no flags, nothing to install first.
 
+**Prefer nothing at all to install?** Paste your own `CREATE TABLE` schema into
+the **[browser playground](https://seedcoherent.github.io/seedcoherent/)** and
+see coherent sample rows instantly — it runs entirely in your browser, no
+database, nothing uploaded.
+
 The database is picked from the connection string: a `postgres://` /
 `postgresql://` or `mysql://` scheme selects that engine, a `sqlserver://` /
 `mssql://` scheme selects SQL Server, while a `sqlite:` / `file:` URL, a

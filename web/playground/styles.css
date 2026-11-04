@@ -1,0 +1,267 @@
+:root {
+  --bg: #0b1120;
+  --panel: #111a2e;
+  --panel-2: #0e1627;
+  --border: #223049;
+  --text: #e6edf6;
+  --muted: #90a0b7;
+  --accent: #5eead4;
+  --accent-dim: #2dd4bf;
+  --fk: #a78bfa;
+  --error: #fb7185;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.masthead,
+main,
+.colophon {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+.masthead {
+  padding-top: 2.5rem;
+  padding-bottom: 1rem;
+}
+
+.masthead h1 {
+  margin: 0;
+  font-size: 1.9rem;
+  letter-spacing: -0.01em;
+}
+
+.masthead h1 span {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.masthead p {
+  color: var(--muted);
+  max-width: 68ch;
+}
+
+code {
+  font-family: var(--mono);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.08em 0.35em;
+  font-size: 0.9em;
+}
+
+.controls {
+  display: grid;
+  gap: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field > span {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 1rem;
+}
+
+textarea,
+select,
+input {
+  font-family: var(--mono);
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.9rem;
+}
+
+textarea {
+  resize: vertical;
+  tab-size: 2;
+}
+
+input[type="number"] {
+  width: 9rem;
+}
+
+textarea:focus,
+select:focus,
+input:focus {
+  outline: 2px solid var(--accent-dim);
+  outline-offset: 1px;
+}
+
+button#generate {
+  font-family: var(--sans);
+  font-weight: 600;
+  background: var(--accent);
+  color: #042f2a;
+  border: none;
+  border-radius: 8px;
+  padding: 0.65rem 1.4rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+button#generate:hover:not(:disabled) {
+  background: var(--accent-dim);
+}
+
+button#generate:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.notice {
+  margin-top: 1.25rem;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+}
+
+.notice--info {
+  background: rgba(94, 234, 212, 0.08);
+  border: 1px solid var(--accent-dim);
+  color: var(--accent);
+}
+
+.notice--error {
+  background: rgba(251, 113, 133, 0.08);
+  border: 1px solid var(--error);
+  color: var(--error);
+}
+
+.output {
+  display: grid;
+  gap: 1.5rem;
+  margin: 1.5rem 0 3rem;
+}
+
+.table-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.table-card h2 {
+  margin: 0;
+  padding: 0.85rem 1.1rem;
+  font-size: 1rem;
+  font-family: var(--mono);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.row-count {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-family: var(--sans);
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+th {
+  background: var(--panel-2);
+  font-family: var(--mono);
+  font-weight: 600;
+  vertical-align: bottom;
+}
+
+th .col-type {
+  display: block;
+  font-weight: 400;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+th.fk,
+td.fk {
+  color: var(--fk);
+}
+
+.fk-mark {
+  display: inline-block;
+  margin-left: 0.3rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--fk);
+  border: 1px solid var(--fk);
+  border-radius: 4px;
+  padding: 0 0.25rem;
+  vertical-align: middle;
+}
+
+td {
+  font-family: var(--mono);
+}
+
+td.null {
+  color: var(--muted);
+  font-style: italic;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.colophon {
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding-bottom: 2.5rem;
+}
+
+a {
+  color: var(--accent);
+}

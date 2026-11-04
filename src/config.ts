@@ -7,8 +7,9 @@ import type { Config, ColumnOverride, DistSpec, CardSpec } from "./types.js";
 
 const DEFAULT_NAMES = ["seed.config.json", "seed.config.js", "seed.config.mjs"];
 
-/** Rows per COPY batch / streaming-generation chunk. */
-export const DEFAULT_BATCH_SIZE = 10000;
+// Re-exported from its Node-free home in types.ts so the emit modules can keep
+// importing it from here; the browser-safe generate path imports it directly.
+export { DEFAULT_BATCH_SIZE } from "./types.js";
 
 export async function loadConfig(explicitPath?: string): Promise<Config> {
   const candidates = explicitPath ? [explicitPath] : DEFAULT_NAMES;

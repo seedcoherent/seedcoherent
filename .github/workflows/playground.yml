@@ -1,0 +1,59 @@
+name: Playground
+
+# Builds the client-side browser playground (web/playground) and publishes it to
+# GitHub Pages. One-time setup: in repo Settings → Pages, set Source to
+# "GitHub Actions". The site serves at https://seedcoherent.github.io/seedcoherent/.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/playground/**"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/playground.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a newer run supersede an in-progress one, but don't cancel it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run playground:typecheck
+      - run: npm run playground:build
+      # Guardrail: the client-side bundle must not contain a database driver or
+      # a Node builtin. If this matches, the offline/browser boundary has leaked.
+      - name: Assert no server-only code leaked into the bundle
+        run: |
+          if grep -rlE 'better-sqlite3|mysql2|node:(fs|stream|path|url|child_process|os|crypto)|__vite-browser-external' web/playground/dist/assets/*.js; then
+            echo "::error::Server-only code leaked into the playground bundle"
+            exit 1
+          fi
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/playground/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

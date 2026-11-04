@@ -18,7 +18,7 @@ import {
   resolveValueSpec,
   type Sampler,
 } from "./distribution.js";
-import { DEFAULT_BATCH_SIZE } from "./config.js";
+import { DEFAULT_BATCH_SIZE } from "./types.js";
 import {
   buildAssignment,
   cardFakerFor,
