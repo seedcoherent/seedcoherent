@@ -362,7 +362,10 @@ function parseColumn(
       base = "bigint";
       colType = "bigint";
     }
-    enumValues = parseEnumValues(colType);
+    // Parse ENUM/SET labels from the original-case type text — `colType` is
+    // lower-cased for categorization, which would otherwise corrupt the labels
+    // (e.g. ENUM('Active') → 'active', ENUM('A','a') → duplicate 'a').
+    enumValues = parseEnumValues(rawType);
     dataType = categorizeMysql(base, colType, enumValues);
     udtName = base;
   } else if (dialect === "sqlserver") {

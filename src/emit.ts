@@ -71,7 +71,11 @@ function arrayElementLiteral(el: unknown): string {
       ? el.toISOString()
       : Buffer.isBuffer(el)
         ? `\\x${el.toString("hex")}`
-        : String(el);
+        : // A json[]/jsonb[] element is a plain JS object/array — serialize it as
+          // JSON rather than letting `String()` yield `[object Object]`.
+          typeof el === "object"
+          ? JSON.stringify(el)
+          : String(el);
   return `"${s.replace(/["\\]/g, "\\$&")}"`;
 }
 

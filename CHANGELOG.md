@@ -4,6 +4,21 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] — 2026-11-04
+
+### Fixed
+
+Correctness hardening, phase 2 — six more cases, across the emit, introspect, and
+generation layers, where generated data was rejected at insert time or stored
+silently wrong, on ordinary schemas with no special flags.
+
+- **Narrow integer types no longer overflow their range.** The integer generator capped values at `1_000_000` (or `30000` for the Postgres spelling `int2`) — but every engine stores its *native* type name in `udtName`, so a MySQL/SQL Server `TINYINT` (max 127/255) or `SMALLINT`, or a MySQL `YEAR`, drew values far above its ceiling and the insert was rejected under strict mode / SQL Server. `src/infer.ts` now resolves an inclusive `integerRange` per column from a width table keyed by normalized `udtName` (`int2`/`smallint` → 32767, `tinyint` → 127, `year` → 1901–2155; wider types keep the generic default, so their seeded output is unchanged). The same clamp is applied in the integer branch of `boundedNumber`, so a CHECK bound can't push a value past the column's width either.
+- **`NUMERIC(p, s)` no longer overflows its precision without a CHECK.** The `10^(p-s)` magnitude clamp existed only inside `boundedNumber`, which runs only when a CHECK was parsed — so a plain `NUMERIC(5,2)` (max 999.99) or a `price NUMERIC(6,2)` column, with no CHECK, drew from the generator's `100000`/`10000` default and triggered Postgres `numeric field overflow`. That clamp is now a shared `numericMagnitudeLimit` helper applied in the `decimal` type fallback and the `price`/`amount` name rule as well as in `boundedNumber`.
+- **SQLite now honors a standalone `CREATE UNIQUE INDEX`.** `src/sqlite-introspect.ts` kept only index origin `'u'` (inline `UNIQUE`) and dropped origin `'c'` (a separate `CREATE UNIQUE INDEX`), so the generator didn't enforce distinctness on that column and emitted duplicates that failed the unique index on load. It now accepts both `'u'` and `'c'` (still skipping the PK's `'pk'` index and expression indexes), matching what the offline DDL parser already did.
+- **Postgres `json[]` / `jsonb[]` array elements serialize as JSON, not `[object Object]`.** `arrayElementLiteral` (`src/emit.ts`) special-cased only `Date` and `Buffer`; a JSON object element fell to `String(el)`, emitting the literal `'{"[object Object]"}'` which the column rejects. A non-`Date`/non-`Buffer` object element is now `JSON.stringify`-d (matching the scalar JSON branch) on both the INSERT and COPY paths.
+- **MySQL `DATE`/`DATETIME` literals are consistent between the script and the live load.** `mysqlLiteral`'s date formatter rendered in UTC but truncated fractional seconds and appended a time to `DATE` columns, while the live `--to` path handed the raw `Date` to `mysql2` (whose formatting depends on the process/connection timezone) — so a generated script and a live load could store different wall-clock values, and `DATETIME(n)` silently lost sub-seconds. `formatDate` is now column-type aware (`DATE` → `YYYY-MM-DD`, `DATETIME`/`TIMESTAMP` → UTC with fractional seconds preserved), and `toParam` pre-formats a `Date` to that same string instead of deferring to `mysql2`, so both paths emit the identical value.
+- **Offline MySQL DDL keeps `ENUM`/`SET` label case.** The schema-file parser (`src/sql-ddl.ts`) lower-cased the whole type text before extracting enum labels, so `ENUM('Active','Pending')` became `active`/`pending` (rejected under a case-sensitive collation) and `ENUM('A','a')` collapsed to a single `'a'`. Labels are now parsed from the original-case type text, matching live introspection.
+
 ## [0.34.0] — 2026-11-02
 
 ### Fixed

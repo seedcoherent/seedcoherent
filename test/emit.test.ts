@@ -70,6 +70,14 @@ test("array Date elements become ISO strings, not Date.toString()", () => {
   );
 });
 
+test("json[]/jsonb[] array elements serialize as JSON, not [object Object]", () => {
+  const sql = sqlLiteral([{ a: 1 }, { b: 2 }], col("t", { udtName: "_jsonb" }));
+  assert.doesNotMatch(sql, /\[object Object\]/);
+  assert.equal(sql, String.raw`'{"{\"a\":1}","{\"b\":2}"}'`);
+  const copy = copyValue([{ a: 1 }], col("t", { udtName: "_jsonb" }));
+  assert.doesNotMatch(copy, /\[object Object\]/);
+});
+
 test("a null array element becomes the unquoted NULL marker", () => {
   assert.equal(
     sqlLiteral(["a", null], col("t", { udtName: "_text" })),

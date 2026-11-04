@@ -81,6 +81,22 @@ test("mysql: inline ENUM columns resolve to enum with their labels", () => {
   assert.deepEqual(status.enumValues, ["pending", "paid", "shipped"]);
 });
 
+test("mysql: ENUM/SET labels keep their original case", () => {
+  // The type text is lower-cased for categorization; the labels must not be, or
+  // a case-sensitive collation rejects the value and ENUM('A','a') collapses.
+  const s = load(
+    `CREATE TABLE t (
+       status ENUM('Active', 'Pending', 'Cancelled') NOT NULL,
+       tags SET('Red', 'Blue')
+     );`,
+    "mysql",
+  );
+  const status = column(tbl(s, "public.t"), "status");
+  assert.deepEqual(status.enumValues, ["Active", "Pending", "Cancelled"]);
+  const tags = column(tbl(s, "public.t"), "tags");
+  assert.deepEqual(tags.enumValues, ["Red", "Blue"]);
+});
+
 test("mysql: BOOLEAN alias and SERIAL are recognized", () => {
   const s = load(
     `CREATE TABLE t (

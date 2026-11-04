@@ -236,14 +236,17 @@ export async function introspectSqlite(
         });
       }
 
-      // Unique constraints — index_list origin 'u' (UNIQUE) or 'pk' (a WITHOUT
-      // ROWID / composite PK backed by an index). We keep 'u'; the PK is tracked
-      // separately above.
+      // Unique constraints — index_list origin 'u' (inline UNIQUE), 'c' (a
+      // standalone `CREATE UNIQUE INDEX`), or 'pk' (a WITHOUT ROWID / composite
+      // PK backed by an index). We keep both 'u' and 'c'; the PK ('pk') is
+      // tracked separately above. (The offline DDL parser already honors
+      // `CREATE UNIQUE INDEX`, so this keeps live and offline in agreement.)
       const idxRes = await client.query<IndexRow>(
         `PRAGMA ${sref}.index_list(${ident(name)})`,
       );
       for (const idx of idxRes.rows) {
-        if (idx.unique !== 1 || idx.origin !== "u") continue;
+        if (idx.unique !== 1 || (idx.origin !== "u" && idx.origin !== "c"))
+          continue;
         const cols = await client.query<IndexColRow>(
           `PRAGMA ${sref}.index_info(${ident(idx.name)})`,
         );
