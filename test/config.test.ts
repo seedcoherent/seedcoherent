@@ -118,6 +118,19 @@ test("parseColumnSpecs keeps a value: literal that itself contains '='", () => {
   });
 });
 
+test("parseColumnSpecs parses pattern: into a regex override, keeping regex chars", () => {
+  assert.deepEqual(parseColumnSpecs(["orders.code=pattern:ORD-[0-9]{6}"]), {
+    "orders.code": { pattern: "ORD-[0-9]{6}" },
+  });
+});
+
+test("parseColumnSpecs parses template: into a template override, keeping braces and '='", () => {
+  assert.deepEqual(
+    parseColumnSpecs(["users.handle=template:user-{seq}={first_name}"]),
+    { "users.handle": { template: "user-{seq}={first_name}" } },
+  );
+});
+
 test("parseColumnSpecs keys off the first '=', so schema-qualified names work", () => {
   assert.deepEqual(parseColumnSpecs(["public.users.email=internet.email"]), {
     "public.users.email": "internet.email",

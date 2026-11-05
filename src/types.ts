@@ -197,7 +197,9 @@ export type ColumnOverride =
   | string // a faker path like "internet.email" or "person.firstName"
   | { faker: string }
   | { value: unknown }
-  | { values: unknown[] }; // pick uniformly from this list
+  | { values: unknown[] } // pick uniformly from this list
+  | { pattern: string } // regex-shaped string, e.g. "ORD-[0-9]{6}"
+  | { template: string }; // literal text with {seq}/{faker.path}/{sibling_col}
 
 export interface Config {
   /** Rows per table, keyed by table name (bare or schema-qualified). */

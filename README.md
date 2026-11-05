@@ -372,7 +372,7 @@ Sample rows:
 | `--skip <table...>` | Tables to leave empty |
 | `--distribution <col=kind...>` | Skew a column: FK fan-out (`orders.user_id=zipf`, `…=zipf:2`) or a value column's labels (`orders.status=zipf`, `orders.status=weighted:paid=0.9,refunded=0.1`); default `uniform` |
 | `--cardinality <col=spec...>` | Bound children per parent on an FK, deriving the child row count: exact (`order_items.order_id=3`) or range (`orders.user_id=1-3`) (see below) |
-| `-C, --column <col=gen...>` | Override a column's generator, e.g. `users.email=internet.email`, `status=values:active,paid`, or `tier=value:gold` (see below) |
+| `-C, --column <col=gen...>` | Override a column's generator, e.g. `users.email=internet.email`, `status=values:active,paid`, `tier=value:gold`, `code=pattern:ORD-[0-9]{6}`, or `handle=template:user-{seq}` (see below) |
 | `--null-rate <col=rate...>` | Fraction (0–1) of rows a nullable column is left `NULL`, e.g. `users.middle_name=0.7` or `orders.deleted_at=1` (see below) |
 | `--profile` | Learn the shape of the existing data — null rates, value weights, FK fan-out, timestamp window — and generate to match (see below) |
 | `--profile-out <file>` | Write the config derived by profiling to a JSON file and exit, no generation (see below) |
@@ -945,13 +945,32 @@ generators or set counts. CLI flags win over the file.
 ```
 
 Column overrides accept a faker path (`"internet.email"`), `{ "faker": "..." }`,
-a fixed `{ "value": ... }`, or `{ "values": [...] }` to pick from a list. Keys are
-`table.column` or a bare `column` to apply everywhere. The same overrides are
-available on the CLI without a config file via `--column`: a bare right-hand side
-is a faker path (`users.email=internet.email`), `value:<x>` is a fixed value
-(`tier=value:gold`), and `values:<a,b,c>` is a pick-list (`status=values:paid,shipped`).
-`value:`/`values:` tokens are JSON-coerced, so `value:30` is the number `30` and
-`value:true` is the boolean; anything that isn't valid JSON stays a string.
+a fixed `{ "value": ... }`, `{ "values": [...] }` to pick from a list,
+`{ "pattern": "..." }` for a regex-shaped string, or `{ "template": "..." }` for
+composed text. Keys are `table.column` or a bare `column` to apply everywhere. The
+same overrides are available on the CLI without a config file via `--column`: a
+bare right-hand side is a faker path (`users.email=internet.email`), `value:<x>`
+is a fixed value (`tier=value:gold`), and `values:<a,b,c>` is a pick-list
+(`status=values:paid,shipped`). `value:`/`values:` tokens are JSON-coerced, so
+`value:30` is the number `30` and `value:true` is the boolean; anything that isn't
+valid JSON stays a string.
+
+`pattern:` generates strings matching a regular expression — handy for SKUs,
+order codes, or ticket numbers: `--column "orders.code=pattern:ORD-[0-9]{6}"`.
+The supported subset covers literals, character classes (`[A-Z]`, `\d`, `\w`,
+`.`), quantifiers (`*`, `+`, `?`, `{n}`, `{n,m}`), groups, and alternation
+(`a|b`); a leading `^` and trailing `$` are optional. An unsupported pattern is
+rejected with an explanatory error.
+
+`template:` fills literal text with `{...}` placeholders:
+`--column "users.handle=template:user-{seq}"`. A placeholder is one of `{seq}` (a
+per-column counter, 1-based; use `{seq:1000}` to start elsewhere), a dotted faker
+path like `{internet.email}`, or a bare identifier naming an **earlier** column on
+the same row — `template:{first_name}-{seq}`. A sibling reference can only read a
+column that is generated before this one (left to right in the table), and sees
+that column's freshly generated value, before any cross-column coherence pass that
+keeps names/addresses consistent. A `null` sibling renders as empty text; double
+braces (`{{`, `}}`) are literal.
 
 `distributions` shapes how a column's values spread, keyed by column (same key
 forms as `columns`, and matching the `--distribution` flag). On a **foreign-key

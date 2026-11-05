@@ -342,6 +342,9 @@ export function parseLinkGroups(specs: string[]): string[][] {
  *   - a faker path, e.g. `users.email=internet.email` → resolve that generator
  *   - `value:<literal>`, e.g. `tier=value:gold` → the constant value every row
  *   - `values:<a,b,c>`, e.g. `status=values:active,inactive` → pick uniformly
+ *   - `pattern:<regex>`, e.g. `code=pattern:ORD-[0-9]{6}` → regex-shaped strings
+ *   - `template:<tpl>`, e.g. `handle=template:user-{seq}` → literal text with
+ *     `{seq}` counters, `{faker.path}`, and `{sibling_column}` placeholders
  * `value:`/`values:` tokens are JSON-coerced (`value:30` → 30, `value:true` →
  * true), falling back to the raw string. Keyed by "table.column",
  * "schema.table.column", or bare "column" — same forms as name inference.
@@ -365,7 +368,11 @@ export function parseColumnSpecs(
     if (!rhs)
       throw new Error(`Invalid --column spec "${spec}" (empty generator)`);
 
-    if (rhs.startsWith("value:")) {
+    if (rhs.startsWith("pattern:")) {
+      out[column] = { pattern: rhs.slice("pattern:".length) };
+    } else if (rhs.startsWith("template:")) {
+      out[column] = { template: rhs.slice("template:".length) };
+    } else if (rhs.startsWith("value:")) {
       out[column] = { value: coerceLiteral(rhs.slice("value:".length)) };
     } else if (rhs.startsWith("values:")) {
       const items = rhs
