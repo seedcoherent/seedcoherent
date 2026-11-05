@@ -407,14 +407,26 @@ function draws(
 test("narrow integer types stay within their range (no CHECK)", () => {
   // TINYINT max 127, SMALLINT/int2 max 32767 — the generic 1,000,000 default
   // would overflow them and the DB would reject the insert.
-  for (const v of draws(col("n", { udtName: "tinyint", dataType: "integer" }), 300))
+  for (const v of draws(
+    col("n", { udtName: "tinyint", dataType: "integer" }),
+    300,
+  ))
     assert.ok(v >= 0 && v <= 127, `tinyint out of range: ${v}`);
-  for (const v of draws(col("n", { udtName: "smallint", dataType: "integer" }), 300))
+  for (const v of draws(
+    col("n", { udtName: "smallint", dataType: "integer" }),
+    300,
+  ))
     assert.ok(v >= 0 && v <= 32767, `smallint out of range: ${v}`);
-  for (const v of draws(col("n", { udtName: "int2", dataType: "integer" }), 300))
+  for (const v of draws(
+    col("n", { udtName: "int2", dataType: "integer" }),
+    300,
+  ))
     assert.ok(v >= 0 && v <= 32767, `int2 out of range: ${v}`);
   // MySQL YEAR accepts 1901–2155 only.
-  for (const v of draws(col("y", { udtName: "year", dataType: "integer" }), 300))
+  for (const v of draws(
+    col("y", { udtName: "year", dataType: "integer" }),
+    300,
+  ))
     assert.ok(v >= 1901 && v <= 2155, `year out of range: ${v}`);
 });
 

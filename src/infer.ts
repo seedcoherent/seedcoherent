@@ -232,7 +232,8 @@ const NUMERIC_NAME_RULES: NumericRule[] = [
       const eps = Math.pow(10, -scale);
       const limit = numericMagnitudeLimit(col, scale, eps);
       let max = limit != null ? Math.min(10_000, limit) : 10_000;
-      if (col.dataType === "integer") max = Math.min(max, integerRange(col).max);
+      if (col.dataType === "integer")
+        max = Math.min(max, integerRange(col).max);
       const val = f.number.float({ min: 0, max, fractionDigits: scale });
       return col.dataType === "integer" ? Math.round(val) : val;
     },
