@@ -6,6 +6,7 @@
 
 import { Faker } from "@faker-js/faker";
 import { valueSampler } from "./distribution.js";
+import type { Row } from "./generate.js";
 import { ctxFor, has, or, tok, type MatchCtx } from "./match.js";
 import { piiGenerator } from "./pii.js";
 import type {
@@ -18,7 +19,13 @@ import type {
   TypeRef,
 } from "./types.js";
 
-export type Generator = (f: Faker) => unknown;
+/**
+ * Turn a Faker instance into one generated value. The optional `row` is the
+ * partially-built row for the current record, populated left-to-right in column
+ * order; a `template:` override reads earlier sibling columns from it. Ordinary
+ * generators ignore it, so a plain `(f) => x` stays assignable here.
+ */
+export type Generator = (f: Faker, row?: Row) => unknown;
 
 /** A name-based rule: if the column name matches, use this generator. */
 interface NameRule {
@@ -511,6 +518,17 @@ function overrideToGenerator(o: ColumnOverride): Generator {
   if (typeof o === "string") return resolveFakerPath(o);
   if ("faker" in o) return resolveFakerPath(o.faker);
   if ("values" in o) return (f) => f.helpers.arrayElement(o.values);
+  if ("pattern" in o) {
+    const gen = patternGenerator(o.pattern);
+    if (!gen)
+      throw new Error(
+        `Unsupported pattern override "${o.pattern}". Supported: literals, ` +
+          `character classes ([A-Z], \\d, \\w, .), quantifiers (* + ? {n} {n,m}), ` +
+          `groups and alternation (a|b); leading ^ / trailing $ are optional.`,
+      );
+    return gen;
+  }
+  if ("template" in o) return templateGenerator(o.template);
   return () => o.value;
 }
 
@@ -922,6 +940,97 @@ function emitNode(node: ReNode, f: Faker): string {
     case "lit":
       return node.s;
   }
+}
+
+// ---- template strings ----
+// Literal text with `{...}` placeholders. A placeholder is one of: `seq` /
+// `seq:START` (a per-column counter), a dotted faker path like `internet.email`,
+// or a bare identifier naming an earlier sibling column on the same row. Braces
+// are escaped by doubling: `{{` and `}}`.
+
+type TemplatePart =
+  | { t: "lit"; s: string }
+  | { t: "seq"; start: number }
+  | { t: "faker"; gen: Generator }
+  | { t: "col"; name: string };
+
+function parseTemplate(tpl: string): TemplatePart[] {
+  const parts: TemplatePart[] = [];
+  let lit = "";
+  const pushLit = () => {
+    if (lit) parts.push({ t: "lit", s: lit });
+    lit = "";
+  };
+  for (let i = 0; i < tpl.length; i++) {
+    const ch = tpl[i];
+    if (ch === "{" && tpl[i + 1] === "{") {
+      lit += "{";
+      i++;
+      continue;
+    }
+    if (ch === "}" && tpl[i + 1] === "}") {
+      lit += "}";
+      i++;
+      continue;
+    }
+    if (ch === "}") throw new Error(`Unmatched "}" in template "${tpl}"`);
+    if (ch !== "{") {
+      lit += ch;
+      continue;
+    }
+    const close = tpl.indexOf("}", i + 1);
+    if (close === -1) throw new Error(`Unterminated "{" in template "${tpl}"`);
+    const body = tpl.slice(i + 1, close).trim();
+    i = close;
+    if (!body) throw new Error(`Empty placeholder "{}" in template "${tpl}"`);
+    pushLit();
+    if (body === "seq" || body.startsWith("seq:")) {
+      const start = body === "seq" ? 1 : Number(body.slice(4));
+      if (!Number.isInteger(start))
+        throw new Error(
+          `Invalid sequence start in "{${body}}" (expected {seq} or {seq:N})`,
+        );
+      parts.push({ t: "seq", start });
+    } else if (body.includes(".")) {
+      parts.push({ t: "faker", gen: resolveFakerPath(body) });
+    } else {
+      parts.push({ t: "col", name: body });
+    }
+  }
+  pushLit();
+  return parts;
+}
+
+/** Build a generator that fills a `{...}` template per row. */
+function templateGenerator(tpl: string): Generator {
+  const parts = parseTemplate(tpl);
+  const counters = new Map<number, number>(); // part index → next value
+  return (f, row) =>
+    parts
+      .map((p, idx) => {
+        switch (p.t) {
+          case "lit":
+            return p.s;
+          case "seq": {
+            const n = counters.get(idx) ?? p.start;
+            counters.set(idx, n + 1);
+            return String(n);
+          }
+          case "faker":
+            return String(p.gen(f));
+          case "col": {
+            if (!row || !(p.name in row))
+              throw new Error(
+                `Template "${tpl}" references column "${p.name}", which is not ` +
+                  `available yet — a template can only read columns that come ` +
+                  `before it in the table.`,
+              );
+            const v = row[p.name];
+            return v == null ? "" : String(v);
+          }
+        }
+      })
+      .join("");
 }
 
 /** Pad or truncate a string to satisfy length bounds (and varchar(n)). */

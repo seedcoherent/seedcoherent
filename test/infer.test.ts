@@ -276,6 +276,104 @@ test("qualified table.column override beats a bare column override", () => {
   assert.equal(v, "qualified");
 });
 
+test("{ pattern } override produces strings matching the regex", () => {
+  const c = col("code");
+  const t = table("t", { columns: [c] });
+  const g = inferGenerator(t, c, { code: { pattern: "ORD-[0-9]{6}" } });
+  const f = faker();
+  for (let i = 0; i < 20; i++) {
+    assert.match(g(f) as string, /^ORD-[0-9]{6}$/);
+  }
+});
+
+test("{ pattern } override supports alternation and character classes", () => {
+  const c = col("sku");
+  const t = table("t", { columns: [c] });
+  const g = inferGenerator(t, c, { sku: { pattern: "(A|B)[a-c]{2}" } });
+  const f = faker();
+  for (let i = 0; i < 20; i++) {
+    assert.match(g(f) as string, /^(A|B)[a-c]{2}$/);
+  }
+});
+
+test("{ pattern } override throws on an unsupported pattern", () => {
+  const c = col("code");
+  const t = table("t", { columns: [c] });
+  assert.throws(
+    () => inferGenerator(t, c, { code: { pattern: "(?=lookahead)x" } }),
+    /Unsupported pattern override/,
+  );
+});
+
+test("{ template } override interpolates literals and a {seq} counter", () => {
+  const c = col("handle");
+  const t = table("t", { columns: [c] });
+  const g = inferGenerator(t, c, { handle: { template: "user-{seq}" } });
+  const f = faker();
+  assert.equal(g(f), "user-1");
+  assert.equal(g(f), "user-2");
+  assert.equal(g(f), "user-3");
+});
+
+test("{ template } {seq:START} honors a custom start", () => {
+  const c = col("handle");
+  const t = table("t", { columns: [c] });
+  const g = inferGenerator(t, c, { handle: { template: "#{seq:100}" } });
+  const f = faker();
+  assert.equal(g(f), "#100");
+  assert.equal(g(f), "#101");
+});
+
+test("{ template } resolves a dotted faker path", () => {
+  const c = col("handle");
+  const t = table("t", { columns: [c] });
+  const g = inferGenerator(t, c, {
+    handle: { template: "<{internet.email}>" },
+  });
+  assert.match(g(faker()) as string, /^<.+@.+>$/);
+});
+
+test("{ template } interpolates an earlier sibling column from the row", () => {
+  const c = col("slug");
+  const t = table("t", { columns: [c] });
+  const g = inferGenerator(t, c, { slug: { template: "{first_name}-{seq}" } });
+  assert.equal(g(faker(), { first_name: "Ada" }), "Ada-1");
+});
+
+test("{ template } renders a null sibling as empty text", () => {
+  const c = col("slug");
+  const t = table("t", { columns: [c] });
+  const g = inferGenerator(t, c, { slug: { template: "x{country}y" } });
+  assert.equal(g(faker(), { country: null }), "xy");
+});
+
+test("{ template } throws when a referenced sibling is not yet available", () => {
+  const c = col("slug");
+  const t = table("t", { columns: [c] });
+  const g = inferGenerator(t, c, { slug: { template: "{missing}" } });
+  assert.throws(() => g(faker(), {}), /references column "missing"/);
+});
+
+test("{ template } doubled braces are literal", () => {
+  const c = col("tpl");
+  const t = table("t", { columns: [c] });
+  const g = inferGenerator(t, c, { tpl: { template: "{{seq}}={seq}" } });
+  assert.equal(g(faker()), "{seq}=1");
+});
+
+test("{ template } rejects an unterminated or empty placeholder", () => {
+  const c = col("tpl");
+  const t = table("t", { columns: [c] });
+  assert.throws(
+    () => inferGenerator(t, c, { tpl: { template: "a-{seq" } }),
+    /Unterminated/,
+  );
+  assert.throws(
+    () => inferGenerator(t, c, { tpl: { template: "a-{}" } }),
+    /Empty placeholder/,
+  );
+});
+
 test("invalid faker path throws when invoked", () => {
   const c = col("x");
   const g = inferGenerator(table("t", { columns: [c] }), c, {

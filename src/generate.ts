@@ -841,9 +841,10 @@ function valueForColumn(
     return null;
   }
 
-  // 4. Generated value.
+  // 4. Generated value. Pass the partially-built row so a `template:` override
+  //    can interpolate earlier sibling columns.
   const gen = gens.get(col.name);
-  return gen ? gen(faker) : null;
+  return gen ? gen(faker, candidate) : null;
 }
 
 function nextIdPeek(table: TableInfo, nextId: () => number): unknown {
