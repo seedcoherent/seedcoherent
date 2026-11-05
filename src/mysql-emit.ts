@@ -26,9 +26,18 @@ function escapeString(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/'/g, "''");
 }
 
-/** MySQL DATETIME literal in UTC ('YYYY-MM-DD HH:MM:SS'), deterministic. */
-function formatDate(d: Date): string {
-  return d.toISOString().slice(0, 19).replace("T", " ");
+/**
+ * MySQL date/datetime literal, rendered in UTC so it is deterministic and
+ * identical on the `--out` script and the live `--to` load. A `DATE` column gets
+ * a date only ('YYYY-MM-DD'); a `DATETIME`/`TIMESTAMP` column keeps its
+ * fractional seconds ('YYYY-MM-DD HH:MM:SS.mmm') — MySQL rounds those to the
+ * column's declared precision rather than rejecting them.
+ */
+function formatDate(d: Date, col: ColumnInfo): string {
+  const iso = d.toISOString();
+  return col.dataType === "date"
+    ? iso.slice(0, 10)
+    : iso.slice(0, 23).replace("T", " ");
 }
 
 /** Format a JS value as a MySQL SQL literal (for --out/--print scripts). */
@@ -36,7 +45,7 @@ export function mysqlLiteral(v: unknown, col: ColumnInfo): string {
   if (v === null || v === undefined) return "NULL";
   if (typeof v === "boolean") return v ? "1" : "0";
   if (typeof v === "number") return String(v);
-  if (v instanceof Date) return `'${formatDate(v)}'`;
+  if (v instanceof Date) return `'${formatDate(v, col)}'`;
   if (Buffer.isBuffer(v)) return `X'${v.toString("hex")}'`;
   if (
     Array.isArray(v) ||
@@ -106,13 +115,17 @@ export function toSqlMysql(
 /**
  * Convert a JS value into a mysql2 bind parameter. Objects/arrays destined for
  * JSON columns must be serialized (mysql2 would otherwise stringify them as
- * `[object Object]`); booleans become 1/0; Dates and Buffers pass through, which
- * mysql2 renders as DATETIME literals and hex blobs respectively.
+ * `[object Object]`); booleans become 1/0; Buffers pass through (mysql2 renders
+ * them as hex blobs). Dates are pre-formatted to the same UTC string the `--out`
+ * script emits — rather than handed to mysql2, whose formatting depends on the
+ * process/connection timezone — so a live load and a generated script store the
+ * identical wall-clock value, and a DATE column gets no spurious time part.
  */
 export function toParam(v: unknown, col: ColumnInfo): unknown {
   if (v === null || v === undefined) return null;
   if (typeof v === "boolean") return v ? 1 : 0;
-  if (v instanceof Date || Buffer.isBuffer(v)) return v;
+  if (v instanceof Date) return formatDate(v, col);
+  if (Buffer.isBuffer(v)) return v;
   if (
     Array.isArray(v) ||
     JSON_TYPES.has(col.dataType) ||

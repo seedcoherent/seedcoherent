@@ -14,16 +14,14 @@ import { col, table } from "./helpers.js";
 
 const textCol = col("c", { udtName: "varchar" });
 const jsonCol = col("meta", { udtName: "json", dataType: "json" });
+const datetimeCol = col("at", { udtName: "datetime", dataType: "timestamp" });
+const dateCol = col("d", { udtName: "date", dataType: "date" });
 
 test("mysqlLiteral formats scalars, dates, blobs, and escapes strings", () => {
   assert.equal(mysqlLiteral(null, textCol), "NULL");
   assert.equal(mysqlLiteral(true, textCol), "1");
   assert.equal(mysqlLiteral(false, textCol), "0");
   assert.equal(mysqlLiteral(42, textCol), "42");
-  assert.equal(
-    mysqlLiteral(new Date("2025-01-02T03:04:05.678Z"), textCol),
-    "'2025-01-02 03:04:05'",
-  );
   assert.equal(mysqlLiteral(Buffer.from([0xde, 0xad]), textCol), "X'dead'");
   // Backslash and single-quote are both escaped (MySQL treats \ as special).
   assert.equal(mysqlLiteral("a'b\\c", textCol), "'a''b\\\\c'");
@@ -33,16 +31,27 @@ test("mysqlLiteral formats scalars, dates, blobs, and escapes strings", () => {
   );
 });
 
-test("toParam converts booleans and serializes JSON, passes Date/Buffer through", () => {
+test("mysqlLiteral renders datetime in UTC keeping sub-seconds, date without a time", () => {
+  const d = new Date("2025-01-02T03:04:05.678Z");
+  // DATETIME/TIMESTAMP: UTC wall-clock with fractional seconds preserved.
+  assert.equal(mysqlLiteral(d, datetimeCol), "'2025-01-02 03:04:05.678'");
+  // DATE: no spurious time component.
+  assert.equal(mysqlLiteral(d, dateCol), "'2025-01-02'");
+});
+
+test("toParam converts booleans, serializes JSON, formats dates, passes Buffers through", () => {
   assert.equal(toParam(true, textCol), 1);
   assert.equal(toParam(false, textCol), 0);
   assert.equal(toParam(null, textCol), null);
-  const d = new Date();
-  assert.equal(toParam(d, textCol), d);
   const b = Buffer.from([1]);
   assert.equal(toParam(b, textCol), b);
   assert.equal(toParam({ a: 1 }, jsonCol), '{"a":1}');
   assert.equal(toParam("hi", textCol), "hi");
+  // A Date is pre-formatted to the same UTC string the script emits, so a live
+  // load and a generated script store the identical value.
+  const d = new Date("2025-01-02T03:04:05.678Z");
+  assert.equal(toParam(d, datetimeCol), "2025-01-02 03:04:05.678");
+  assert.equal(toParam(d, dateCol), "2025-01-02");
 });
 
 test("toSqlMysql wraps inserts with FK-check toggles and a transaction", () => {

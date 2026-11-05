@@ -158,6 +158,46 @@ type NumericRule = {
 };
 
 /**
+ * Upper bound for an integer column whose declared width is narrower than the
+ * generic default — so a `TINYINT`/`SMALLINT`/`YEAR` column never receives a
+ * value the database rejects as out of range. Keyed by normalized `udtName`
+ * across engines (Postgres `int2`; MySQL/SQL Server `tinyint`/`smallint`). The
+ * generator's `min` is 0, so an `UNSIGNED` column (whose max is higher) stays in
+ * range too. Wider types (`int4`/`int`/`mediumint`/`bigint`/`int8`) are omitted:
+ * the generic default already fits them, so their output is left unchanged.
+ */
+const NARROW_INTEGER_MAX: Record<string, number> = {
+  int2: 32767,
+  smallint: 32767,
+  tinyint: 127,
+};
+const DEFAULT_INTEGER_MAX = 1_000_000;
+
+/** Inclusive integer range a generated value must stay within for `col`'s type. */
+function integerRange(col: ColumnInfo): { min: number; max: number } {
+  const key = col.udtName?.toLowerCase() ?? "";
+  // MySQL YEAR accepts 1901–2155 only.
+  if (key === "year") return { min: 1901, max: 2155 };
+  return { min: 0, max: NARROW_INTEGER_MAX[key] ?? DEFAULT_INTEGER_MAX };
+}
+
+/**
+ * Largest magnitude a `numeric(p, s)` column can hold — `10^(p-s)` minus one
+ * scale unit — or `null` when no precision is declared. Used to keep generated
+ * decimals from overflowing the column even when no CHECK bound was parsed.
+ */
+function numericMagnitudeLimit(
+  col: ColumnInfo,
+  scale: number,
+  eps: number,
+): number | null {
+  if (col.numericPrecision != null && col.numericPrecision > 0) {
+    return Math.pow(10, col.numericPrecision - scale) - eps;
+  }
+  return null;
+}
+
+/**
  * Name rules for numeric columns. `NAME_RULES` only apply to text/date columns,
  * so without these an `integer`/`numeric` column named `age` or `rating` would
  * fall through to a generic 0..1,000,000 range. First match wins.
@@ -188,11 +228,13 @@ const NUMERIC_NAME_RULES: NumericRule[] = [
       tok("cost", "total", "balance", "fee"),
     ),
     gen: (f, col) => {
-      const val = f.number.float({
-        min: 0,
-        max: 10_000,
-        fractionDigits: Math.min(col.numericScale ?? 2, 6),
-      });
+      const scale = Math.min(col.numericScale ?? 2, 6);
+      const eps = Math.pow(10, -scale);
+      const limit = numericMagnitudeLimit(col, scale, eps);
+      let max = limit != null ? Math.min(10_000, limit) : 10_000;
+      if (col.dataType === "integer")
+        max = Math.min(max, integerRange(col).max);
+      const val = f.number.float({ min: 0, max, fractionDigits: scale });
       return col.dataType === "integer" ? Math.round(val) : val;
     },
   },
@@ -208,20 +250,16 @@ function generatorForType(col: ColumnInfo): Generator {
       return (f) => f.datatype.boolean();
     case "uuid":
       return (f) => f.string.uuid();
-    case "integer":
-      return (f) =>
-        f.number.int({
-          min: 0,
-          max: col.udtName === "int2" ? 30000 : 1_000_000,
-        });
+    case "integer": {
+      const { min, max } = integerRange(col);
+      return (f) => f.number.int({ min, max });
+    }
     case "decimal": {
-      const scale = col.numericScale ?? 2;
-      return (f) =>
-        f.number.float({
-          min: 0,
-          max: 100000,
-          fractionDigits: Math.min(scale, 6),
-        });
+      const scale = Math.min(col.numericScale ?? 2, 6);
+      const eps = Math.pow(10, -scale);
+      const limit = numericMagnitudeLimit(col, scale, eps);
+      const max = limit != null ? Math.min(100000, limit) : 100000;
+      return (f) => f.number.float({ min: 0, max, fractionDigits: scale });
     }
     case "date":
       return (f) => f.date.past({ years: 3 });
@@ -669,6 +707,11 @@ function boundedNumber(col: ColumnInfo, check: ColumnCheck): Generator {
         : undefined;
     if (lo === undefined) lo = hi! - SPAN;
     if (hi === undefined) hi = lo + SPAN;
+    // Keep an open-ended SPAN (and the CHECK bound itself) inside the column's
+    // integer width, so e.g. a SMALLINT never overflows its 32767 ceiling.
+    const width = integerRange(col);
+    lo = Math.max(lo, width.min);
+    hi = Math.min(hi, width.max);
     if (lo > hi) hi = lo;
     const [min, max] = [lo, hi];
     return (f) => f.number.int({ min, max });
@@ -688,8 +731,8 @@ function boundedNumber(col: ColumnInfo, check: ColumnCheck): Generator {
   if (lo > hi) hi = lo;
   // An open-ended SPAN must not overflow numeric(p, s): the largest magnitude a
   // numeric(p, s) holds is 10^(p-s) minus one scale unit.
-  if (col.numericPrecision != null && col.numericPrecision > 0) {
-    const limit = Math.pow(10, col.numericPrecision - scale) - eps;
+  const limit = numericMagnitudeLimit(col, scale, eps);
+  if (limit != null) {
     hi = Math.min(hi, limit);
     lo = Math.max(lo, -limit);
     if (lo > hi) hi = lo;

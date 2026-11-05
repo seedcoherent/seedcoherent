@@ -391,3 +391,70 @@ test("JSON shape wins over text name heuristics (json 'description')", () => {
   const v = jsonVal("description");
   assert.equal(typeof v, "object");
 });
+
+/** Draw `n` values from a column's inferred generator with one seeded faker. */
+function draws(
+  c: ReturnType<typeof col>,
+  n: number,
+  check?: ColumnCheck,
+): number[] {
+  const t = table("t", { columns: [c] });
+  const g = inferGenerator(t, c, {}, check);
+  const f = faker();
+  return Array.from({ length: n }, () => g(f) as number);
+}
+
+test("narrow integer types stay within their range (no CHECK)", () => {
+  // TINYINT max 127, SMALLINT/int2 max 32767 — the generic 1,000,000 default
+  // would overflow them and the DB would reject the insert.
+  for (const v of draws(
+    col("n", { udtName: "tinyint", dataType: "integer" }),
+    300,
+  ))
+    assert.ok(v >= 0 && v <= 127, `tinyint out of range: ${v}`);
+  for (const v of draws(
+    col("n", { udtName: "smallint", dataType: "integer" }),
+    300,
+  ))
+    assert.ok(v >= 0 && v <= 32767, `smallint out of range: ${v}`);
+  for (const v of draws(
+    col("n", { udtName: "int2", dataType: "integer" }),
+    300,
+  ))
+    assert.ok(v >= 0 && v <= 32767, `int2 out of range: ${v}`);
+  // MySQL YEAR accepts 1901–2155 only.
+  for (const v of draws(
+    col("y", { udtName: "year", dataType: "integer" }),
+    300,
+  ))
+    assert.ok(v >= 1901 && v <= 2155, `year out of range: ${v}`);
+});
+
+test("a CHECK bound is still clamped to the column's integer width", () => {
+  // SMALLINT with an open-ended lower bound must not run past 32767.
+  const c = col("n", { udtName: "smallint", dataType: "integer" });
+  for (const v of draws(c, 300, { min: 30000 }))
+    assert.ok(v >= 30000 && v <= 32767, `out of smallint range: ${v}`);
+});
+
+test("NUMERIC(p,s) never overflows its precision without a CHECK", () => {
+  // NUMERIC(5,2) holds at most 999.99; the decimal fallback max of 100000 and
+  // the price-rule max of 10000 would both overflow it.
+  const priceCol = col("price", {
+    udtName: "numeric",
+    dataType: "decimal",
+    numericPrecision: 5,
+    numericScale: 2,
+  });
+  for (const v of draws(priceCol, 300))
+    assert.ok(v >= 0 && v <= 999.99, `priced numeric overflow: ${v}`);
+
+  const plainCol = col("rate", {
+    udtName: "numeric",
+    dataType: "decimal",
+    numericPrecision: 4,
+    numericScale: 2,
+  });
+  for (const v of draws(plainCol, 300))
+    assert.ok(v >= 0 && v <= 99.99, `plain numeric overflow: ${v}`);
+});

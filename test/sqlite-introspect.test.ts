@@ -141,6 +141,27 @@ test("introspectSqlite reads columns, keys, uniques, FKs, and checks", async () 
   assert.equal(total.numericPrecision, 10);
 });
 
+test("introspectSqlite honors a standalone CREATE UNIQUE INDEX", async () => {
+  // A uniqueness constraint declared as a separate statement (index origin 'c')
+  // must be picked up, not just inline UNIQUE ('u') — otherwise the generator
+  // emits duplicates and the insert hits a unique violation.
+  const conn = memConn(`
+    CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT, tenant TEXT, slug TEXT);
+    CREATE UNIQUE INDEX ux_email ON users(email);
+    CREATE UNIQUE INDEX ux_tenant_slug ON users(tenant, slug);
+    CREATE INDEX ix_slug ON users(slug);
+  `);
+  const schema = await introspectSqlite(conn, ["main"]);
+  await conn.end();
+
+  const users = schema.tables.get("main.users")!;
+  // Both unique indexes are captured; the non-unique index is ignored.
+  assert.deepEqual(
+    [...users.uniques].sort(),
+    [["email"], ["tenant", "slug"]].sort(),
+  );
+});
+
 test("introspectSqlite handles composite PK/FK and a null FK target (rowid)", async () => {
   const conn = memConn(`
     CREATE TABLE orders (id INTEGER PRIMARY KEY);
