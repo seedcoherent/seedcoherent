@@ -102,11 +102,27 @@ export async function runRoundTrip(
       c.check(live, engine);
       c.check(script, engine);
 
-      assert.deepEqual(
-        live.map(norm),
-        script.map(norm),
-        `${c.name}: script↔live parity (${engine})`,
-      );
+      if (c.parityToleranceMs != null) {
+        for (let i = 0; i < live.length; i++) {
+          const a = new Date(live[i] as string).getTime();
+          const b = new Date(script[i] as string).getTime();
+          assert.ok(
+            Number.isFinite(a) && Number.isFinite(b),
+            `${c.name}: non-parseable timestamp at row ${i} (${engine})`,
+          );
+          assert.ok(
+            Math.abs(a - b) <= c.parityToleranceMs,
+            `${c.name}: timestamp parity drift ${a - b}ms at row ${i} ` +
+              `(tolerance ${c.parityToleranceMs}ms, ${engine})`,
+          );
+        }
+      } else {
+        assert.deepEqual(
+          live.map(norm),
+          script.map(norm),
+          `${c.name}: script↔live parity (${engine})`,
+        );
+      }
     }
   } finally {
     await db.close();

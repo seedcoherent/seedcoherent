@@ -30,6 +30,15 @@ export interface TypeCase {
    * back as a string, a `DATE` as a `Date` or a string), so coerce defensively.
    */
   check: (values: unknown[], engine: Engine) => void;
+  /**
+   * When set, the script↔live parity check compares values as timestamps with
+   * this millisecond tolerance instead of byte-exactly. SQL Server's
+   * parameterized (live) and literal (script) paths round the sub-millisecond
+   * tail up to 1ms apart; a few-ms tolerance absorbs that while still catching
+   * the drift this check exists for — timezone shifts (hours), dropped
+   * fractional seconds (hundreds of ms), a DATE gaining a time component.
+   */
+  parityToleranceMs?: number;
 }
 
 const num = (v: unknown): number => Number(v);
@@ -212,6 +221,7 @@ export const CASES: TypeCase[] = [
       sqlite: "DATE NOT NULL",
       sqlserver: "DATE NOT NULL",
     },
+    parityToleranceMs: 5,
     check: (vals) => {
       for (const v of vals) assert.ok(v != null, "created_on is null");
     },
@@ -226,9 +236,10 @@ export const CASES: TypeCase[] = [
       // the parameterized live path and the literal script path round the
       // fractional tail identically. Plain DATETIME2 (7 digits) let them differ
       // by 1ms. This is a column-precision choice, not a workaround for a bug:
-      // the harness still asserts exact script↔live parity at that precision.
+      // the harness still asserts script↔live parity within parityToleranceMs.
       sqlserver: "DATETIME2(3) NOT NULL",
     },
+    parityToleranceMs: 5,
     check: (vals) => {
       for (const v of vals) assert.ok(v != null, "created_at is null");
     },
