@@ -11,7 +11,11 @@ import { insertDataSqlite, toSqlSqlite } from "../src/sqlite-emit.js";
 import type { Connection } from "../src/types.js";
 import type { TableData } from "../src/generate.js";
 import { casesFor, columnClauses } from "./roundtrip/fixtures.js";
-import { runRoundTrip, type RtDb } from "./roundtrip/runner.js";
+import {
+  runRoundTrip,
+  TEST_TIMEOUT_MS,
+  type RtDb,
+} from "./roundtrip/runner.js";
 
 const cases = casesFor("sqlite");
 const { preambles, columns } = columnClauses("sqlite", cases);
@@ -42,6 +46,9 @@ function makeDb(): Promise<RtDb> {
     loadScript: async (data: TableData[]) => {
       db.exec(toSqlSqlite(data));
     },
+    reset: async () => {
+      db.exec("DELETE FROM rt");
+    },
     read: async (column: string) =>
       db
         .prepare(`SELECT ${column} AS v FROM rt ORDER BY id`)
@@ -54,6 +61,10 @@ function makeDb(): Promise<RtDb> {
   return Promise.resolve(handle);
 }
 
-test("SQLite type round-trip (live insert ↔ SQL script)", async () => {
-  await runRoundTrip("sqlite", makeDb);
-});
+test(
+  "SQLite type round-trip (live insert ↔ SQL script)",
+  { timeout: TEST_TIMEOUT_MS },
+  async () => {
+    await runRoundTrip("sqlite", makeDb);
+  },
+);
