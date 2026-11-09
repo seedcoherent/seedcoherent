@@ -57,7 +57,7 @@
     "testing",
     "fixtures"
   ],
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "dependencies": {
     "@faker-js/faker": "^9.3.0",
     "better-sqlite3": "^12.11.1",
