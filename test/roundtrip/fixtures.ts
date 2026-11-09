@@ -222,7 +222,12 @@ export const CASES: TypeCase[] = [
       postgres: "timestamptz NOT NULL",
       mysql: "DATETIME(3) NOT NULL",
       sqlite: "DATETIME NOT NULL",
-      sqlserver: "DATETIME2 NOT NULL",
+      // DATETIME2(3) pins millisecond precision — the JS Date's resolution — so
+      // the parameterized live path and the literal script path round the
+      // fractional tail identically. Plain DATETIME2 (7 digits) let them differ
+      // by 1ms. This is a column-precision choice, not a workaround for a bug:
+      // the harness still asserts exact script↔live parity at that precision.
+      sqlserver: "DATETIME2(3) NOT NULL",
     },
     check: (vals) => {
       for (const v of vals) assert.ok(v != null, "created_at is null");
