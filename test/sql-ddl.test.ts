@@ -380,6 +380,21 @@ test("sqlserver: maps types, IDENTITY, brackets, PK/unique, and dbo default sche
   assert.equal(column(users, "ref").nullable, true);
 });
 
+test("sqlserver: INTEGER spelling is a supported integer synonym for INT", () => {
+  const s = load(
+    `
+    CREATE TABLE [dbo].[categories] (
+      [id]   INTEGER NOT NULL,
+      [name] NVARCHAR(100) NOT NULL,
+      CONSTRAINT [PK_categories] PRIMARY KEY ([id])
+    );
+    `,
+    "sqlserver",
+  );
+  const categories = tbl(s, "dbo.categories");
+  assert.equal(column(categories, "id").dataType, "integer");
+});
+
 test("sqlserver: GO batch separators split statements without semicolons", () => {
   const s = load(
     `
