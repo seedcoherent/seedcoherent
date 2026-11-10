@@ -20,6 +20,7 @@ export function categorizeMssql(dataType: string): string {
     case "tinyint":
     case "smallint":
     case "int":
+    case "integer":
     case "bigint":
       return "integer";
     case "bit":
