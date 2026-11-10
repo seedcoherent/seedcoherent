@@ -56,6 +56,21 @@ export function categorize(
       return "macaddr";
     case "xml":
       return "xml";
+    case "bit":
+    case "varbit":
+      return "bitstring";
+    case "point":
+    case "line":
+    case "lseg":
+    case "box":
+    case "path":
+    case "polygon":
+    case "circle":
+      return "geometric";
+    case "tsvector":
+      return "tsvector";
+    case "tsquery":
+      return "tsquery";
     case "text":
     case "varchar":
     case "bpchar":
@@ -63,8 +78,8 @@ export function categorize(
     case "name":
       return "text";
     default:
-      // A type we don't know how to generate a valid literal for (tsvector,
-      // PostGIS geometry, bit/varbit, …). Marking it
+      // A type we don't know how to generate a valid literal for — PostGIS
+      // geometry/geography and exotics like pg_lsn, txid_snapshot. Marking it
       // "unsupported" — rather than guessing "text" and emitting lorem that the
       // INSERT rejects — lets generation NULL/skip it or fail with a clear message.
       return "unsupported";

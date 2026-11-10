@@ -400,6 +400,74 @@ export const CASES: TypeCase[] = [
       }
     },
   },
+
+  // ── Postgres fillable literal types ──────────────────────────────────────
+  // Regression for the Gap 3 coverage work: bit/varbit, geometric, and
+  // tsvector/tsquery were categorized "unsupported" (NULL'd or fail-fast on
+  // NOT NULL). They now generate a valid literal Postgres coerces on insert.
+  {
+    name: "bits",
+    ddl: { postgres: "bit(8) NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        // Postgres reads a bit(n) back as a string of '0'/'1' of length n.
+        assert.match(String(v), /^[01]{8}$/, `bits malformed: ${v}`);
+      }
+    },
+  },
+  {
+    name: "varbits",
+    ddl: { postgres: "bit varying(16) NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        const s = String(v);
+        assert.match(s, /^[01]+$/, `varbits malformed: ${v}`);
+        assert.ok(s.length <= 16, `varbits too long: ${v}`);
+      }
+    },
+  },
+  {
+    name: "loc",
+    ddl: { postgres: "point NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        // point reads back as "(x,y)".
+        assert.match(
+          String(v),
+          /^\(-?[\d.]+,-?[\d.]+\)$/,
+          `loc malformed: ${v}`,
+        );
+      }
+    },
+  },
+  {
+    name: "region",
+    ddl: { postgres: "box NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        // box reads back as "(x1,y1),(x2,y2)".
+        assert.ok(String(v).includes(","), `region malformed: ${v}`);
+      }
+    },
+  },
+  {
+    name: "search_vec",
+    ddl: { postgres: "tsvector NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        assert.ok(String(v).length > 0, "search_vec empty");
+      }
+    },
+  },
+  {
+    name: "search_q",
+    ddl: { postgres: "tsquery NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        assert.ok(String(v).length > 0, "search_q empty");
+      }
+    },
+  },
 ];
 
 /** Cases that declare a DDL fragment for the given engine. */

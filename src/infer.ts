@@ -302,6 +302,29 @@ function generatorForType(col: ColumnInfo): Generator {
       return compositeGenerator(col.compositeFields ?? []);
     case "range":
       return rangeGenerator(col.rangeSubtype);
+    case "bitstring": {
+      // bit(n) has a fixed length (col.maxLength); bit varying may be
+      // unbounded, so cap at a small random width. Postgres coerces the
+      // '0'/'1' string literal to bit/varbit.
+      return (f) => {
+        const len = max ?? f.number.int({ min: 1, max: 8 });
+        return Array.from({ length: len }, () =>
+          f.helpers.arrayElement(["0", "1"]),
+        ).join("");
+      };
+    }
+    case "geometric":
+      return geometricGenerator(col.udtName);
+    case "tsvector":
+      // A space-separated set of lexemes; Postgres parses the literal to
+      // tsvector (whitespace becomes the token separator).
+      return (f) => f.lorem.words({ min: 2, max: 5 });
+    case "tsquery":
+      // Lexemes joined with tsquery operators (& / |); a valid query string.
+      return (f) =>
+        f.helpers
+          .multiple(() => f.lorem.word(), { count: { min: 1, max: 3 } })
+          .join(f.helpers.arrayElement([" & ", " | "]));
     case "unsupported":
       // No safe literal for this type. Emit NULL — valid for nullable columns;
       // NOT NULL ones without a default/override are rejected up front by
@@ -427,6 +450,39 @@ function intervalLiteral(f: Faker): string {
   const m = String(f.number.int({ min: 0, max: 59 })).padStart(2, "0");
   const s = String(f.number.int({ min: 0, max: 59 })).padStart(2, "0");
   return `${days} days ${h}:${m}:${s}`;
+}
+
+/**
+ * Built-in geometric types: emit the Postgres text representation as a string
+ * literal, which Postgres coerces to the column type on insert. One shape per
+ * udtName — point `(x,y)`, lseg/box as two points, line `{A,B,C}`, path/polygon
+ * as a point list, circle `<(x,y),r>`.
+ */
+function geometricGenerator(udtName: string): Generator {
+  const coord = (f: Faker) =>
+    f.number.float({ min: -1000, max: 1000, fractionDigits: 2 });
+  const pt = (f: Faker) => `(${coord(f)},${coord(f)})`;
+  const points = (f: Faker, n: number) =>
+    Array.from({ length: n }, () => pt(f)).join(",");
+  switch (udtName) {
+    case "point":
+      return (f) => pt(f);
+    case "lseg":
+    case "box":
+      return (f) => `(${pt(f)},${pt(f)})`;
+    case "line":
+      // Standard-form coefficients {A,B,C}; A and B must not both be zero.
+      return (f) =>
+        `{${f.number.float({ min: -10, max: 10, fractionDigits: 2 }) || 1},${coord(f)},${coord(f)}}`;
+    case "path":
+    case "polygon":
+      return (f) => `(${points(f, f.number.int({ min: 3, max: 5 }))})`;
+    case "circle":
+      return (f) =>
+        `<${pt(f)},${f.number.float({ min: 0.1, max: 500, fractionDigits: 2 })}>`;
+    default:
+      return () => null;
+  }
 }
 
 /** Minimal ColumnInfo so a nested type (array element, composite field) can reuse generatorForType. */
