@@ -296,12 +296,108 @@ export const CASES: TypeCase[] = [
       }
     },
   },
+  // Binary round-trips across every engine that has a native binary type. The
+  // live path binds a Buffer; the script path must emit an engine-correct binary
+  // literal (PG `\x…`::bytea, MySQL/SQLite `x'…'`, SQL Server `0x…`). A mis-
+  // encoded literal surfaces as a rejected insert or a script↔live parity break.
   {
-    name: "blob",
-    ddl: { postgres: "bytea NOT NULL" },
+    // Not named `blob`: that is a reserved word in MySQL, and the harness emits
+    // column names unquoted, so a reserved identifier breaks CREATE TABLE.
+    name: "bin_data",
+    ddl: {
+      postgres: "bytea NOT NULL",
+      mysql: "BLOB NOT NULL",
+      sqlite: "BLOB NOT NULL",
+      sqlserver: "VARBINARY(900) NOT NULL",
+    },
     check: (vals) => {
+      // MySQL may hand back a Buffer or a (binary) string depending on driver
+      // flags; SQLite returns a Buffer; SQL Server a Buffer. Only require the
+      // value be present and non-mangled — parity in the runner catches drift.
       for (const v of vals)
-        assert.ok(Buffer.isBuffer(v) || v != null, "blob is null/invalid");
+        assert.ok(Buffer.isBuffer(v) || v != null, "bin_data is null/invalid");
+    },
+  },
+
+  // ── Cross-engine identifier (UUID/GUID) ─────────────────────────────────
+  // Each engine stores a 36-char RFC-4122 identifier in its native-ish type.
+  // SQL Server's UNIQUEIDENTIFIER reads back upper-cased, so lower-case first.
+  {
+    name: "guid",
+    ddl: {
+      postgres: "uuid NOT NULL",
+      mysql: "CHAR(36) NOT NULL",
+      sqlite: "TEXT NOT NULL",
+      sqlserver: "UNIQUEIDENTIFIER NOT NULL",
+    },
+    check: (vals) => {
+      const re =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+      for (const v of vals) {
+        const s = String(v).toLowerCase();
+        assert.ok(re.test(s), `guid "${v}" is not a UUID`);
+      }
+    },
+  },
+
+  // ── Scalar JSON ─────────────────────────────────────────────────────────
+  // First harness exercise of MySQL's native JSON type and SQLite's JSON-name
+  // honoring (introspect classifies any type spelled `JSON` as json, even under
+  // SQLite's loose affinity). SQL Server is excluded: it has no JSON type — JSON
+  // there lives in a plain nvarchar column, which carries no generation signal.
+  // A mis-serialized object reads back as the literal "[object Object]".
+  {
+    name: "doc_json",
+    ddl: {
+      postgres: "jsonb NOT NULL",
+      mysql: "JSON NOT NULL",
+      sqlite: "JSON NOT NULL",
+    },
+    check: (vals) => {
+      for (const v of vals) {
+        assert.notEqual(v, "[object Object]", "doc_json value mangled");
+        if (typeof v === "string") {
+          // pg/mysql drivers auto-parse; sqlite/sqlserver hand back text.
+          assert.doesNotThrow(
+            () => JSON.parse(v),
+            `doc_json "${v}" is not valid JSON`,
+          );
+        } else {
+          assert.equal(typeof v, "object", "doc_json did not parse to JSON");
+        }
+      }
+    },
+  },
+
+  // ── Native MySQL ENUM ───────────────────────────────────────────────────
+  // Distinct introspection + generation path from a CHECK(IN) membership set —
+  // the MySQL analogue of the Postgres-only native `mood` case above.
+  {
+    name: "my_enum",
+    ddl: { mysql: "ENUM('Happy','Sad','Meh') NOT NULL" },
+    check: (vals) => {
+      const set = new Set(["Happy", "Sad", "Meh"]);
+      for (const v of vals) {
+        assert.ok(set.has(String(v)), `my_enum ${v} not a valid enum label`);
+      }
+    },
+  },
+
+  // ── MySQL MEDIUMINT width ────────────────────────────────────────────────
+  // Extends the narrow-integer-overflow coverage (the 0.35.0 `integerRange`
+  // fix) to MySQL's 3-byte int, whose ceiling sits between SMALLINT and INT.
+  {
+    name: "med_int",
+    ddl: { mysql: "MEDIUMINT NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        const n = num(v);
+        assert.ok(Number.isInteger(n), `med_int not an integer: ${v}`);
+        assert.ok(
+          n >= -8388608 && n <= 8388607,
+          `med_int ${n} outside MEDIUMINT range`,
+        );
+      }
     },
   },
 ];
