@@ -61,6 +61,19 @@ test("maps columns, types, nullability, and length/precision", () => {
   assert.equal(column(users, "created_at").dataType, "timestamp");
 });
 
+test("maps datetime and datetime2 to timestamp in postgres dialect", () => {
+  const s = loadSchemaFromDdl(`
+    CREATE TABLE events (
+      id         SERIAL PRIMARY KEY,
+      created_at DATETIME NOT NULL,
+      updated_at DATETIME2
+    );
+  `);
+  const events = tbl(s, "public.events");
+  assert.equal(column(events, "created_at").dataType, "timestamp");
+  assert.equal(column(events, "updated_at").dataType, "timestamp");
+});
+
 test("resolves enum types declared with CREATE TYPE", () => {
   const s = loadSchemaFromDdl(`
     CREATE TYPE order_status AS ENUM ('pending', 'paid', 'shipped');

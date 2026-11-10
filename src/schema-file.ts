@@ -62,6 +62,8 @@ const TYPE_ALIASES: Record<string, string> = {
   bpchar: "bpchar",
   text: "text",
   citext: "citext",
+  datetime: "timestamp",
+  datetime2: "timestamp",
   timestamp: "timestamp",
   timestamptz: "timestamptz",
   "timestamp without time zone": "timestamp",
