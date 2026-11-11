@@ -431,12 +431,21 @@ export const CASES: TypeCase[] = [
     ddl: { postgres: "point NOT NULL" },
     check: (vals) => {
       for (const v of vals) {
-        // point reads back as "(x,y)".
-        assert.match(
-          String(v),
-          /^\(-?[\d.]+,-?[\d.]+\)$/,
-          `loc malformed: ${v}`,
-        );
+        // node-postgres parses `point` into { x, y } on the live path; the
+        // SQL-script path may surface the raw "(x,y)" string. Accept both.
+        if (v !== null && typeof v === "object") {
+          const p = v as { x: unknown; y: unknown };
+          assert.ok(
+            Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)),
+            `loc malformed: ${JSON.stringify(v)}`,
+          );
+        } else {
+          assert.match(
+            String(v),
+            /^\(-?[\d.]+,-?[\d.]+\)$/,
+            `loc malformed: ${v}`,
+          );
+        }
       }
     },
   },
@@ -445,8 +454,11 @@ export const CASES: TypeCase[] = [
     ddl: { postgres: "box NOT NULL" },
     check: (vals) => {
       for (const v of vals) {
-        // box reads back as "(x1,y1),(x2,y2)".
-        assert.ok(String(v).includes(","), `region malformed: ${v}`);
+        // box has no node-postgres parser; it reads back as the string
+        // "(x1,y1),(x2,y2)". Coerce defensively in case a driver parses it.
+        const s =
+          typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+        assert.ok(s.includes(","), `region malformed: ${s}`);
       }
     },
   },
