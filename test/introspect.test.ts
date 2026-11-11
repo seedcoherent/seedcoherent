@@ -61,7 +61,16 @@ test("money, interval, macaddr, and xml have their own categories", () => {
 
 test("unknown types are flagged unsupported, not guessed as text", () => {
   assert.equal(categorize("some_custom_domain", null), "unsupported");
-  assert.equal(categorize("tsvector", null), "unsupported");
   assert.equal(categorize("geometry", null), "unsupported");
-  assert.equal(categorize("bit", null), "unsupported");
+  assert.equal(categorize("pg_lsn", null), "unsupported");
+  assert.equal(categorize("txid_snapshot", null), "unsupported");
+});
+
+test("fillable literal types are categorized, not flagged unsupported", () => {
+  assert.equal(categorize("bit", null), "bitstring");
+  assert.equal(categorize("varbit", null), "bitstring");
+  assert.equal(categorize("point", null), "geometric");
+  assert.equal(categorize("box", null), "geometric");
+  assert.equal(categorize("tsvector", null), "tsvector");
+  assert.equal(categorize("tsquery", null), "tsquery");
 });

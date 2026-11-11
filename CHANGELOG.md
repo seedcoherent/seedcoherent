@@ -4,6 +4,31 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.0] — 2026-11-10
+
+### Added
+
+Four more Postgres column types now generate a valid literal instead of being
+treated as unsupported (NULL'd on nullable columns, dropped when defaulted, or
+rejected up front on a NOT NULL column with no default/override/covering FK).
+
+- **`bit(n)` / `bit varying(n)`** emit a string of `0`/`1` — exactly `n` bits for
+  a fixed-width `bit(n)` (from the column's declared length), a small random width
+  for unbounded `bit varying`. (`categorize` → `bitstring` in `src/introspect.ts`,
+  generated in `src/infer.ts`.)
+- **Built-in geometric types** — `point`, `line`, `lseg`, `box`, `path`,
+  `polygon`, `circle` — emit their Postgres text form (`(x,y)`, `{A,B,C}`,
+  `<(x,y),r>`, point lists), which Postgres coerces on insert. (`geometric`
+  category; shape chosen per `udtName`.)
+- **`tsvector` / `tsquery`** emit a lexeme string (space-separated for `tsvector`,
+  `&`/`|`-joined for `tsquery`).
+- The offline schema-file parser (`src/schema-file.ts`) now aliases
+  `bit varying` → `varbit` so `--schema-file` runs categorize these identically
+  to live introspection.
+
+PostGIS `geometry`/`geography` and exotics (`pg_lsn`, `txid_snapshot`, …) remain
+unsupported. `money`, `interval`, and range types were already generated.
+
 ## [0.35.0] — 2026-11-04
 
 ### Fixed

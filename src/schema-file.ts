@@ -84,6 +84,8 @@ const TYPE_ALIASES: Record<string, string> = {
   macaddr: "macaddr",
   macaddr8: "macaddr8",
   xml: "xml",
+  "bit varying": "varbit",
+  varbit: "varbit",
 };
 
 /** `serial`/`bigserial`/`smallserial` imply a `nextval(...)` default. */

@@ -22,6 +22,48 @@ test("categorize routes an unknown udtName to the unsupported category", () => {
   assert.equal(col("g", { udtName: "geometry" }).dataType, "unsupported");
 });
 
+test("fillable types are routed away from unsupported", () => {
+  // helpers.col derives dataType via categorize() when not given explicitly.
+  assert.equal(col("b", { udtName: "bit" }).dataType, "bitstring");
+  assert.equal(col("vb", { udtName: "varbit" }).dataType, "bitstring");
+  assert.equal(col("p", { udtName: "point" }).dataType, "geometric");
+  assert.equal(col("bx", { udtName: "box" }).dataType, "geometric");
+  assert.equal(col("tv", { udtName: "tsvector" }).dataType, "tsvector");
+  assert.equal(col("tq", { udtName: "tsquery" }).dataType, "tsquery");
+});
+
+test("a NOT NULL fillable column is not flagged as unsupported", () => {
+  const t = table("docs", {
+    columns: [
+      idCol(),
+      col("flags", { udtName: "bit" }),
+      col("loc", { udtName: "point" }),
+      col("search", { udtName: "tsvector" }),
+    ],
+    primaryKey: ["id"],
+  });
+  const bad = requiredUnsupportedColumns(schema(t), {}, ["public.docs"]);
+  assert.deepEqual(bad, []);
+});
+
+test("generation fills NOT NULL bit / point / tsvector columns", () => {
+  const t = table("docs", {
+    columns: [
+      idCol(),
+      col("flags", { udtName: "bit", maxLength: 8 }),
+      col("loc", { udtName: "point" }),
+      col("search", { udtName: "tsvector" }),
+    ],
+    primaryKey: ["id"],
+  });
+  const [d] = gen(schema(t), { defaultRows: 5, seed: 1 });
+  for (const r of d.rows) {
+    assert.match(String(r.flags), /^[01]{8}$/);
+    assert.match(String(r.loc), /^\(-?[\d.]+,-?[\d.]+\)$/);
+    assert.ok(String(r.search).length > 0);
+  }
+});
+
 test("requiredUnsupportedColumns flags a NOT NULL unsupported column", () => {
   const t = table("docs", {
     columns: [idCol(), col("geom", { udtName: "geometry" })],

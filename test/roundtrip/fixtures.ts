@@ -400,6 +400,86 @@ export const CASES: TypeCase[] = [
       }
     },
   },
+
+  // ── Postgres fillable literal types ──────────────────────────────────────
+  // Regression for the Gap 3 coverage work: bit/varbit, geometric, and
+  // tsvector/tsquery were categorized "unsupported" (NULL'd or fail-fast on
+  // NOT NULL). They now generate a valid literal Postgres coerces on insert.
+  {
+    name: "bits",
+    ddl: { postgres: "bit(8) NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        // Postgres reads a bit(n) back as a string of '0'/'1' of length n.
+        assert.match(String(v), /^[01]{8}$/, `bits malformed: ${v}`);
+      }
+    },
+  },
+  {
+    name: "varbits",
+    ddl: { postgres: "bit varying(16) NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        const s = String(v);
+        assert.match(s, /^[01]+$/, `varbits malformed: ${v}`);
+        assert.ok(s.length <= 16, `varbits too long: ${v}`);
+      }
+    },
+  },
+  {
+    name: "loc",
+    ddl: { postgres: "point NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        // node-postgres parses `point` into { x, y } on the live path; the
+        // SQL-script path may surface the raw "(x,y)" string. Accept both.
+        if (v !== null && typeof v === "object") {
+          const p = v as { x: unknown; y: unknown };
+          assert.ok(
+            Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)),
+            `loc malformed: ${JSON.stringify(v)}`,
+          );
+        } else {
+          assert.match(
+            String(v),
+            /^\(-?[\d.]+,-?[\d.]+\)$/,
+            `loc malformed: ${v}`,
+          );
+        }
+      }
+    },
+  },
+  {
+    name: "region",
+    ddl: { postgres: "box NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        // box has no node-postgres parser; it reads back as the string
+        // "(x1,y1),(x2,y2)". Coerce defensively in case a driver parses it.
+        const s =
+          typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+        assert.ok(s.includes(","), `region malformed: ${s}`);
+      }
+    },
+  },
+  {
+    name: "search_vec",
+    ddl: { postgres: "tsvector NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        assert.ok(String(v).length > 0, "search_vec empty");
+      }
+    },
+  },
+  {
+    name: "search_q",
+    ddl: { postgres: "tsquery NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        assert.ok(String(v).length > 0, "search_q empty");
+      }
+    },
+  },
 ];
 
 /** Cases that declare a DDL fragment for the given engine. */
