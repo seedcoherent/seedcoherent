@@ -11,7 +11,9 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # postgres:16 plus the PostGIS extension (available via CREATE EXTENSION),
+        # so the round-trip harness can exercise geometry/geography columns.
+        image: postgis/postgis:16-3.4
         env:
           POSTGRES_PASSWORD: postgres
         ports:

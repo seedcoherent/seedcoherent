@@ -480,6 +480,62 @@ export const CASES: TypeCase[] = [
       }
     },
   },
+
+  // ── Postgres exotics + PostGIS ───────────────────────────────────────────
+  // Previously "unsupported"; now generate a valid literal Postgres coerces on
+  // insert. pg_lsn/txid_snapshot are built-in; geometry/geography need PostGIS
+  // (CI uses the postgis/postgis image, so CREATE EXTENSION succeeds).
+  {
+    name: "wal_pos",
+    ddl: { postgres: "pg_lsn NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        // pg_lsn reads back as "XX.../XX..." (hex halves, no leading-zero pad).
+        assert.match(
+          String(v),
+          /^[0-9A-F]{1,8}\/[0-9A-F]{1,8}$/,
+          `wal_pos malformed: ${v}`,
+        );
+      }
+    },
+  },
+  {
+    name: "snap",
+    ddl: { postgres: "txid_snapshot NOT NULL" },
+    check: (vals) => {
+      for (const v of vals) {
+        const s = String(v);
+        // "xmin:xmax:xip_list" — a non-empty string with two ':' separators.
+        assert.equal((s.match(/:/g) ?? []).length, 2, `snap malformed: ${s}`);
+      }
+    },
+  },
+  {
+    name: "shape",
+    ddl: { postgres: "geometry NOT NULL" },
+    preamble: { postgres: "CREATE EXTENSION IF NOT EXISTS postgis" },
+    check: (vals) => {
+      for (const v of vals) {
+        // node-postgres reads geometry back as the hex EWKB string; coerce
+        // defensively in case a driver surfaces a parsed object instead.
+        const s =
+          typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+        assert.ok(s.length > 0, "shape empty");
+      }
+    },
+  },
+  {
+    name: "place",
+    ddl: { postgres: "geography(Point,4326) NOT NULL" },
+    preamble: { postgres: "CREATE EXTENSION IF NOT EXISTS postgis" },
+    check: (vals) => {
+      for (const v of vals) {
+        const s =
+          typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+        assert.ok(s.length > 0, "place empty");
+      }
+    },
+  },
 ];
 
 /** Cases that declare a DDL fragment for the given engine. */

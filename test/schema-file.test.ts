@@ -74,6 +74,27 @@ test("maps datetime and datetime2 to timestamp in postgres dialect", () => {
   assert.equal(column(events, "updated_at").dataType, "timestamp");
 });
 
+test("strips PostGIS typmods so a spatial table still parses", () => {
+  const s = loadSchemaFromDdl(`
+    CREATE TABLE places (
+      id    SERIAL PRIMARY KEY,
+      shape geometry NOT NULL,
+      spot  geography(Point, 4326) NOT NULL,
+      area  geometry(MultiPolygon, 4326),
+      lsn   pg_lsn,
+      snap  txid_snapshot
+    );
+  `);
+  const places = tbl(s, "public.places");
+  // Without the typmod strip the whole CREATE TABLE would be discarded.
+  assert.equal(column(places, "shape").dataType, "geo");
+  assert.equal(column(places, "spot").udtName, "geography");
+  assert.equal(column(places, "spot").dataType, "geo");
+  assert.equal(column(places, "area").dataType, "geo");
+  assert.equal(column(places, "lsn").dataType, "pg_lsn");
+  assert.equal(column(places, "snap").dataType, "txid_snapshot");
+});
+
 test("resolves enum types declared with CREATE TYPE", () => {
   const s = loadSchemaFromDdl(`
     CREATE TYPE order_status AS ENUM ('pending', 'paid', 'shipped');

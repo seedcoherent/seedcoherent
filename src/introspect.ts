@@ -71,6 +71,14 @@ export function categorize(
       return "tsvector";
     case "tsquery":
       return "tsquery";
+    case "geometry":
+    case "geography":
+      return "geo";
+    case "pg_lsn":
+      return "pg_lsn";
+    case "txid_snapshot":
+    case "pg_snapshot":
+      return "txid_snapshot";
     case "text":
     case "varchar":
     case "bpchar":
@@ -78,8 +86,8 @@ export function categorize(
     case "name":
       return "text";
     default:
-      // A type we don't know how to generate a valid literal for — PostGIS
-      // geometry/geography and exotics like pg_lsn, txid_snapshot. Marking it
+      // A type we don't know how to generate a valid literal for — a custom
+      // domain/base type, or anything else outside the cases above. Marking it
       // "unsupported" — rather than guessing "text" and emitting lorem that the
       // INSERT rejects — lets generation NULL/skip it or fail with a clear message.
       return "unsupported";

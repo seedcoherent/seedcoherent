@@ -113,6 +113,31 @@ test("xml column yields a well-formed record element", () => {
   );
 });
 
+test("geometry/geography column yields a WKT POINT in lon/lat range", () => {
+  for (const udtName of ["geometry", "geography"]) {
+    const v = gen(col("loc", { udtName })) as string;
+    const m = v.match(/^POINT\((-?[\d.]+) (-?[\d.]+)\)$/);
+    assert.ok(m, `not a WKT point: ${v}`);
+    const [lon, lat] = [Number(m![1]), Number(m![2])];
+    assert.ok(lon >= -180 && lon <= 180, `lon out of range: ${lon}`);
+    assert.ok(lat >= -90 && lat <= 90, `lat out of range: ${lat}`);
+  }
+});
+
+test("pg_lsn column yields two hex halves joined by a slash", () => {
+  const v = gen(col("wal_pos", { udtName: "pg_lsn" })) as string;
+  assert.match(v, /^[0-9A-F]{8}\/[0-9A-F]{8}$/);
+});
+
+test("txid_snapshot column yields xmin:xmax: with xmin <= xmax", () => {
+  for (const udtName of ["txid_snapshot", "pg_snapshot"]) {
+    const v = gen(col("snap", { udtName })) as string;
+    const m = v.match(/^(\d+):(\d+):$/);
+    assert.ok(m, `not a snapshot literal: ${v}`);
+    assert.ok(Number(m![1]) <= Number(m![2]), `xmin > xmax: ${v}`);
+  }
+});
+
 test("decimal respects numeric scale", () => {
   const c = col("ratio", { udtName: "numeric", numericScale: 3 });
   const v = gen(c) as number;
