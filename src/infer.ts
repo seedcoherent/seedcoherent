@@ -325,6 +325,26 @@ function generatorForType(col: ColumnInfo): Generator {
         f.helpers
           .multiple(() => f.lorem.word(), { count: { min: 1, max: 3 } })
           .join(f.helpers.arrayElement([" & ", " | "]));
+    case "geo":
+      // PostGIS geometry/geography: a WKT `POINT(lon lat)` literal. Coordinates
+      // stay in lon/lat range so the same literal is valid for geography (which
+      // enforces -180..180 / -90..90) as well as geometry. PostGIS's text input
+      // (assignment) cast parses WKT into the column type on insert.
+      return (f) =>
+        `POINT(${f.location.longitude({ precision: 6 })} ${f.location.latitude({ precision: 6 })})`;
+    case "pg_lsn":
+      // A log sequence number: two 32-bit hex halves joined by '/', e.g.
+      // "16B3C4D8/0A1F2E00". Postgres parses this textual form directly.
+      return (f) => `${hex8(f)}/${hex8(f)}`;
+    case "txid_snapshot":
+      // "xmin:xmax:xip_list" with xmin <= xmax and an empty active-xid list —
+      // the simplest always-valid form, accepted for txid_snapshot and the
+      // newer pg_snapshot alike. Postgres coerces the string literal on insert.
+      return (f) => {
+        const xmin = f.number.int({ min: 1, max: 1_000_000 });
+        const xmax = xmin + f.number.int({ min: 0, max: 1000 });
+        return `${xmin}:${xmax}:`;
+      };
     case "unsupported":
       // No safe literal for this type. Emit NULL — valid for nullable columns;
       // NOT NULL ones without a default/override are rejected up front by
@@ -438,6 +458,15 @@ function jsonGenerator(col: ColumnInfo): Generator {
     source: f.helpers.arrayElement(["web", "mobile", "api", "import"]),
     version: f.number.int({ min: 1, max: 5 }),
   });
+}
+
+/** One 32-bit half of a pg_lsn, as 8 uppercase hex digits. */
+function hex8(f: Faker): string {
+  return f.number
+    .int({ min: 0, max: 0xffffffff })
+    .toString(16)
+    .toUpperCase()
+    .padStart(8, "0");
 }
 
 /**

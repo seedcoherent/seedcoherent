@@ -454,13 +454,25 @@ export function loadSchemaFromDdl(
 }
 
 /**
+ * PostGIS declares spatial columns with a type modifier naming a subtype and
+ * SRID — `geometry(Point,4326)`, `geography(MultiPolygon,4326)`. `pgsql-ast-parser`
+ * rejects that modifier (its identifier argument isn't valid typmod syntax),
+ * which would discard the whole `CREATE TABLE`. We don't use the subtype/SRID,
+ * so strip the modifier down to the bare type name; the column then resolves to
+ * `geometry`/`geography` exactly as live introspection reports it.
+ */
+function stripPostgisTypmods(sql: string): string {
+  return sql.replace(/\b(geometry|geography)\s*\([^)]*\)/gi, "$1");
+}
+
+/**
  * Postgres front-end. Two passes: first collect enum label sets (`CREATE TYPE
  * ... AS ENUM`) so columns typed by them resolve to `enum`, then build each
  * table; `ALTER TABLE ... ADD CONSTRAINT` is folded in last so a constraint
  * declared after its table still lands on it.
  */
 function loadPostgresDdl(sql: string): Schema {
-  const statements = parseStatements(sql);
+  const statements = parseStatements(stripPostgisTypmods(sql));
 
   const enums = new Map<string, string[]>();
   for (const stmt of statements) {

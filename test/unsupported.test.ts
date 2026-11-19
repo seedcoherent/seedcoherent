@@ -1,6 +1,6 @@
 /**
- * Columns of a type we can't generate a valid literal for (money, interval,
- * tsvector, geometry, …) must never get lorem text stuffed into them — that
+ * Columns of a type we can't generate a valid literal for (a custom domain,
+ * `aclitem`, `regclass`, …) must never get lorem text stuffed into them — that
  * fails the INSERT and rolls back the whole run. Instead we NULL/skip what we
  * safely can and flag the rest up front.
  */
@@ -19,7 +19,7 @@ function gen(s: ReturnType<typeof schema>, config: Config) {
 
 test("categorize routes an unknown udtName to the unsupported category", () => {
   // helpers.col derives dataType via categorize() when not given explicitly.
-  assert.equal(col("g", { udtName: "geometry" }).dataType, "unsupported");
+  assert.equal(col("g", { udtName: "aclitem" }).dataType, "unsupported");
 });
 
 test("fillable types are routed away from unsupported", () => {
@@ -66,23 +66,23 @@ test("generation fills NOT NULL bit / point / tsvector columns", () => {
 
 test("requiredUnsupportedColumns flags a NOT NULL unsupported column", () => {
   const t = table("docs", {
-    columns: [idCol(), col("geom", { udtName: "geometry" })],
+    columns: [idCol(), col("geom", { udtName: "aclitem" })],
     primaryKey: ["id"],
   });
   const bad = requiredUnsupportedColumns(schema(t), {}, ["public.docs"]);
   assert.equal(bad.length, 1);
   assert.equal(bad[0].column, "geom");
-  assert.equal(bad[0].udtName, "geometry");
+  assert.equal(bad[0].udtName, "aclitem");
 });
 
 test("nullable / defaulted / overridden / FK-served columns are not flagged", () => {
   const t = table("docs", {
     columns: [
       idCol(),
-      col("a", { udtName: "geometry", nullable: true }),
-      col("b", { udtName: "geometry", hasDefault: true }),
-      col("c", { udtName: "geometry" }),
-      col("d", { udtName: "geometry" }),
+      col("a", { udtName: "aclitem", nullable: true }),
+      col("b", { udtName: "aclitem", hasDefault: true }),
+      col("c", { udtName: "aclitem" }),
+      col("d", { udtName: "aclitem" }),
     ],
     primaryKey: ["id"],
     // A (contrived) FK makes `d` draw its value from a parent row.
@@ -97,8 +97,8 @@ test("generation NULLs a nullable unsupported column and omits a defaulted one",
   const t = table("docs", {
     columns: [
       idCol(),
-      col("shape", { udtName: "geometry", nullable: true }),
-      col("area", { udtName: "geometry", hasDefault: true }),
+      col("shape", { udtName: "aclitem", nullable: true }),
+      col("area", { udtName: "aclitem", hasDefault: true }),
     ],
     primaryKey: ["id"],
   });
@@ -114,7 +114,7 @@ test("generation NULLs a nullable unsupported column and omits a defaulted one",
 
 test("an override fills an unsupported column instead of NULL", () => {
   const t = table("docs", {
-    columns: [idCol(), col("shape", { udtName: "geometry" })],
+    columns: [idCol(), col("shape", { udtName: "aclitem" })],
     primaryKey: ["id"],
   });
   const config: Config = {

@@ -29,14 +29,25 @@ async function makeDb(): Promise<RtDb> {
   const schema = `rt_${Date.now()}`;
   const client = new pg.Client({ connectionString: url });
   await client.connect();
-  await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-  await client.query(`CREATE SCHEMA ${schema}`);
-  // search_path lets the bare table name and enum type in the DDL resolve here.
-  await client.query(`SET search_path TO ${schema}`);
-  for (const p of preambles) await client.query(p);
-  await client.query(
-    `CREATE TABLE rt (\n  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n  ${columns.join(",\n  ")}\n)`,
-  );
+  // If any setup step throws (e.g. a type the server lacks), the RtDb is never
+  // returned, so runRoundTrip's finally can't close this client — a leaked
+  // connection keeps the event loop alive and hangs the whole run. Close it here
+  // on failure before rethrowing.
+  try {
+    await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await client.query(`CREATE SCHEMA ${schema}`);
+    // The throwaway schema is searched first (bare `rt` + enum types resolve
+    // there); `public` stays on the path so extension types installed there by
+    // the postgis image — geometry/geography — still resolve.
+    await client.query(`SET search_path TO ${schema}, public`);
+    for (const p of preambles) await client.query(p);
+    await client.query(
+      `CREATE TABLE rt (\n  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n  ${columns.join(",\n  ")}\n)`,
+    );
+  } catch (err) {
+    await client.end();
+    throw err;
+  }
 
   return {
     introspect: () => introspect(client, [schema]),

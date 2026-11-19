@@ -4,6 +4,29 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.0] — 2026-11-18
+
+### Added
+
+The last Postgres column types that were still treated as unsupported now
+generate a valid literal Postgres coerces on insert — finishing the type-filling
+work begun in 0.36.0.
+
+- **PostGIS `geometry` / `geography`** emit a WKT `POINT(lon lat)` literal, with
+  coordinates kept in lon/lat range (`-180..180` / `-90..90`) so the same literal
+  is valid for `geography` as well as `geometry`. (`categorize` → `geo` in
+  `src/introspect.ts`, generated in `src/infer.ts`.)
+- **`pg_lsn`** emits a log sequence number as two 32-bit hex halves joined by `/`
+  (e.g. `16B3C4D8/0A1F2E00`).
+- **`txid_snapshot` / `pg_snapshot`** emit `xmin:xmax:` with `xmin <= xmax` and an
+  empty active-xid list — the simplest always-valid form, accepted by both types.
+- The offline schema-file parser (`src/schema-file.ts`) categorizes these
+  identically to live introspection (the names pass through unaliased to
+  `categorize`), so `--schema-file` runs generate them too.
+- The type round-trip harness now covers all four across the live-insert and
+  SQL-script paths; CI's Postgres service image is `postgis/postgis:16-3.4` so
+  `CREATE EXTENSION postgis` is available for the geometry/geography cases.
+
 ## [0.36.0] — 2026-11-10
 
 ### Added
