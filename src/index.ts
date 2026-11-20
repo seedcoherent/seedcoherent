@@ -43,11 +43,17 @@ import type {
   Config,
   DistSpec,
   OnConflict,
+  RedactLevel,
   Schema,
 } from "./types.js";
 
 export type { Row } from "./generate.js";
-export type { ColumnOverride, DistSpec, OnConflict } from "./types.js";
+export type {
+  ColumnOverride,
+  DistSpec,
+  OnConflict,
+  RedactLevel,
+} from "./types.js";
 export type { DialectName } from "./dialect.js";
 
 /**
@@ -102,6 +108,16 @@ export interface SeedOptions {
   nullRates?: Record<string, number>;
   /** Per-column generator overrides: `{ "users.email": "internet.email" }`. */
   columns?: Record<string, ColumnOverride>;
+  /**
+   * Replace PII column values with a constant redaction value (`[REDACTED]` for
+   * text, NULL where the column is nullable, or a type-safe placeholder
+   * otherwise) instead of a realistic fake, so the output visibly contains no
+   * PII. The level selects which sensitivity tiers are redacted: `high` (SSN,
+   * passport, bank account, …), `medium` (adds email, phone, name, address, …),
+   * or `all` (adds coarse geo). Join keys are never redacted, so FK integrity is
+   * preserved; an explicit `columns` override still wins over redaction.
+   */
+  redact?: RedactLevel;
 }
 
 /** One generated table, in dependency (insert-safe) order. */
@@ -166,6 +182,7 @@ export async function seed(options: SeedOptions): Promise<SeedResult> {
     locale: options.locale,
     since: options.since,
     until: options.until,
+    redact: options.redact,
   };
 
   // Validate the temporal window, locale, and null rates up front, exactly as the

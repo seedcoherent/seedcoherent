@@ -873,7 +873,17 @@ export function anonymizeAll(
         continue;
       }
       plan.set(col.name, {
-        gen: inferGenerator(table, col, config.columns, checks.get(col.name)),
+        // Ordinary (non-key, non-linked) PII columns honor --redact here. Key
+        // groups and --link groups above keep their consistent-fake remap so FK
+        // integrity and value-joins survive, so redaction is not applied to them.
+        gen: inferGenerator(
+          table,
+          col,
+          config.columns,
+          checks.get(col.name),
+          undefined,
+          config.redact,
+        ),
         cache: new Map(),
         used: uniqueCols.has(col.name) ? new Set() : undefined,
       });

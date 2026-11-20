@@ -397,6 +397,7 @@ Sample rows:
 | `--link <group...>` | Scrub denormalized copies to the *same* fake (see below) |
 | `--scan` | Print a per-column privacy report and exit without copying (see below) |
 | `--json` | With `--scan`, emit the report as JSON instead of a table |
+| `--redact [level]` | Replace PII column values with `[REDACTED]`/NULL instead of fakes (see below) |
 
 ### Cardinality
 
@@ -869,6 +870,49 @@ npx seedcoherent $PROD_URL --subset users=1 --scan --json > privacy-report.json
 
   5 columns · 3 PII · 1 PII copied verbatim ⚠
 ```
+
+### Redact PII (`--redact`)
+
+`--anonymize` and the default subset scrub replace PII with *realistic* fakes —
+great for staging that must still look and behave like production. Sometimes you
+want the opposite: output that **visibly** contains no PII, to hand to a vendor,
+paste into a ticket, or commit as a fixture. `--redact` replaces each PII column
+with a constant redaction value instead of a fake:
+
+- `[REDACTED]` for a text column;
+- `NULL` where the column is nullable;
+- a type-safe placeholder otherwise (`0` for numbers, `false` for booleans, the
+  nil UUID, the Unix epoch for date/time columns) so the row still inserts.
+
+It works in **both** modes — a from-scratch generate and a `--subset` copy. The
+level selects which sensitivity tiers are redacted (bare `--redact` means `high`):
+
+- **`high`** — SSN, tax id, passport, driver's license, national id, bank
+  account, credit card, password, date of birth;
+- **`medium`** — adds email, phone, person name, street address, IP address;
+- **`all`** — adds low-risk coarse geo (city, country, postal code).
+
+```bash
+# Generate a fixture with every high-risk field blanked.
+npx seedcoherent --schema-file schema.sql --redact --print
+
+# Subset real data, redacting through medium risk.
+npx seedcoherent $PROD_URL --subset orders=500 --to $STAGING_URL --redact medium
+```
+
+Two guarantees worth knowing:
+
+- **Join keys are never redacted.** A primary key, a foreign-key column, or a
+  column an FK references keeps a valid (consistent) value so referential
+  integrity survives. To scrub a key that is itself PII, use `--anonymize` /
+  `--scrub-keys`, which remap it consistently across the join. A **unique** PII
+  column can't be a single constant either, so it gets a distinct
+  `[REDACTED-xxxx]` token (text) or an anonymized value (non-text) per row.
+- **Explicit intent wins.** A `--column` override and a subset `--preserve` are
+  deliberate, so they are left untouched by `--redact`.
+
+The config file accepts a `redact` field (`"high"`, `"medium"`, or `"all"`), and
+the programmatic API takes a `redact` option on `seed()`.
 
 ## Append to a database that already has data
 

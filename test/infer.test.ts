@@ -581,3 +581,83 @@ test("NUMERIC(p,s) never overflows its precision without a CHECK", () => {
   for (const v of draws(plainCol, 300))
     assert.ok(v >= 0 && v <= 99.99, `plain numeric overflow: ${v}`);
 });
+
+// --- redact mode ----------------------------------------------------------
+
+/** Infer + invoke a generator with a redact level; `unique` marks the column. */
+function genRedact(
+  c: ReturnType<typeof col>,
+  level: "high" | "medium" | "all",
+  opts: { unique?: boolean } = {},
+): unknown {
+  const t = table("t", {
+    columns: [c],
+    uniques: opts.unique ? [[c.name]] : [],
+  });
+  return inferGenerator(t, c, {}, undefined, undefined, level)(faker());
+}
+
+test("redact high replaces a NOT NULL text PII column with [REDACTED]", () => {
+  assert.equal(genRedact(col("ssn"), "high"), "[REDACTED]");
+});
+
+test("redact leaves a nullable PII column NULL", () => {
+  assert.equal(genRedact(col("ssn", { nullable: true }), "high"), null);
+});
+
+test("redact gives a NOT NULL date PII column the Unix epoch, not a crash", () => {
+  const v = genRedact(col("date_of_birth", { udtName: "date" }), "high");
+  assert.ok(v instanceof Date);
+  assert.equal((v as Date).getTime(), 0);
+});
+
+test("redact type-safe placeholders for non-text NOT NULL PII columns", () => {
+  // Classification is by name ("ssn" = high), so the type drives the placeholder.
+  assert.equal(genRedact(col("ssn", { udtName: "int4" }), "high"), 0);
+  assert.equal(
+    genRedact(col("ssn", { udtName: "bool", dataType: "boolean" }), "high"),
+    false,
+  );
+  assert.equal(
+    genRedact(col("ssn", { udtName: "uuid" }), "high"),
+    "00000000-0000-0000-0000-000000000000",
+  );
+});
+
+test("redact high spares medium/low PII; medium catches email; all catches geo", () => {
+  // email is medium-risk: untouched at high, redacted at medium.
+  assert.match(genRedact(col("email"), "high") as string, /@/);
+  assert.equal(genRedact(col("email"), "medium"), "[REDACTED]");
+  // city is low-risk (geo): only `all` redacts it.
+  assert.notEqual(genRedact(col("city"), "medium"), "[REDACTED]");
+  assert.equal(typeof genRedact(col("city"), "medium"), "string");
+  assert.equal(genRedact(col("city"), "all"), "[REDACTED]");
+});
+
+test("redact of a unique text PII column is distinct per draw", () => {
+  const c = col("ssn");
+  const t = table("t", { columns: [c], uniques: [["ssn"]] });
+  const f = faker();
+  const g = inferGenerator(t, c, {}, undefined, undefined, "high");
+  const a = g(f) as string;
+  const b = g(f) as string;
+  assert.match(a, /^\[REDACTED-[0-9A-Za-z]{8}\]$/);
+  assert.notEqual(a, b);
+});
+
+test("an explicit override still wins over redact", () => {
+  const t = table("t", { columns: [col("ssn")] });
+  const g = inferGenerator(
+    t,
+    col("ssn"),
+    { "t.ssn": { value: "kept" } },
+    undefined,
+    undefined,
+    "high",
+  );
+  assert.equal(g(faker()), "kept");
+});
+
+test("redact off leaves generation unchanged (realistic SSN)", () => {
+  assert.match(gen(col("ssn")) as string, /^\d{3}-\d{2}-\d{4}$/);
+});

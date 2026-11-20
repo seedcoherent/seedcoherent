@@ -58,7 +58,15 @@ import {
 import { buildProfile, formatProfileSummary, mergeProfile } from "./profile.js";
 import { resolveLocale } from "./locale.js";
 import { temporalWindow } from "./temporal.js";
-import type { Config, OnConflict, OutputFormat, TableInfo } from "./types.js";
+import {
+  isRedactLevel,
+  REDACT_LEVELS,
+  type Config,
+  type OnConflict,
+  type OutputFormat,
+  type RedactLevel,
+  type TableInfo,
+} from "./types.js";
 import type { TableData } from "./generate.js";
 
 /**
@@ -229,6 +237,10 @@ export function buildProgram(): Command {
       "subset: automatically anonymize key columns that look like PII (what the leak warning suggests), remapped consistently across joins",
     )
     .option(
+      "--redact [level]",
+      "replace PII column values with [REDACTED]/NULL instead of realistic fakes (level: high | medium | all; default high). Applies to generation and subset. Join keys are never redacted; an explicit --column override still wins",
+    )
+    .option(
       "--scan",
       "subset: print a per-column privacy report (PII class + scrub/keep/key action) and exit without copying any data",
     )
@@ -253,6 +265,21 @@ export function buildProgram(): Command {
       }
 
       const fileConfig = await loadConfig(opts.config);
+
+      // --redact takes an optional level: bare `--redact` means `high`; an
+      // explicit value must be one of the known levels. A config-file `redact`
+      // is the fallback when the flag is absent, and is validated too so a raw
+      // config file can't smuggle in a bad level.
+      let redact: RedactLevel | undefined = fileConfig.redact;
+      if (opts.redact !== undefined) {
+        redact = opts.redact === true ? "high" : opts.redact;
+      }
+      if (redact !== undefined && !isRedactLevel(redact)) {
+        program.error(
+          `Unknown --redact level '${redact}'. Use ${REDACT_LEVELS.join(", ")}.`,
+        );
+      }
+
       const config: Config = {
         ...fileConfig,
         rows: { ...fileConfig.rows, ...parseRowSpecs(opts.rows) },
@@ -282,6 +309,7 @@ export function buildProgram(): Command {
         preserve: [...(fileConfig.preserve ?? []), ...opts.preserve],
         link: [...(fileConfig.link ?? []), ...parseLinkGroups(opts.link)],
         secret: opts.secret ?? fileConfig.secret,
+        redact,
       };
 
       // Validate the temporal window and locale up front so a bad --since/--until

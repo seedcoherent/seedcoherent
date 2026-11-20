@@ -192,6 +192,24 @@ export type OutputFormat = "sql" | "csv" | "ndjson";
  */
 export type OnConflict = "skip" | "update";
 
+/**
+ * How aggressively to redact PII columns, replacing their values with a constant
+ * (`[REDACTED]`/NULL/a type-safe placeholder) instead of a realistic fake. Levels
+ * are cumulative by sensitivity: `high` redacts only high-risk categories (SSN,
+ * passport, bank account, …); `medium` adds medium-risk ones (email, phone, name,
+ * address, …); `all` additionally redacts low-risk ones (coarse geo). Join keys
+ * are never redacted, so foreign-key integrity is preserved.
+ */
+export type RedactLevel = "high" | "medium" | "all";
+
+/** The accepted `--redact` levels, least to most aggressive. */
+export const REDACT_LEVELS: RedactLevel[] = ["high", "medium", "all"];
+
+/** Narrow a raw string to a known redact level. */
+export function isRedactLevel(v: string): v is RedactLevel {
+  return (REDACT_LEVELS as string[]).includes(v);
+}
+
 /** Per-column override supplied by the user via config. */
 export type ColumnOverride =
   | string // a faker path like "internet.email" or "person.firstName"
@@ -276,6 +294,16 @@ export interface Config {
    * Ignored on the direct-insert, `--to`, and `csv`/`ndjson` paths.
    */
   onConflict?: OnConflict;
+  /**
+   * Replace PII column values with a constant redaction value
+   * (`[REDACTED]` for text, NULL where the column is nullable, or a type-safe
+   * placeholder otherwise) instead of a realistic fake, so the output visibly
+   * contains no PII. Applies to both generation and subset+anonymize. The level
+   * selects which sensitivity tiers are redacted (see {@link RedactLevel}). Join
+   * keys are never redacted (FK integrity is preserved); an explicit `columns`
+   * override or a subset `preserve` entry still wins over redaction.
+   */
+  redact?: RedactLevel;
   /**
    * Subset+anonymize only: columns to scrub even though they are join keys
    * (primary keys, FK columns, or columns an FK references). Naming any one

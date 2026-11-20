@@ -4,6 +4,37 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.0] — 2026-11-19
+
+### Added
+
+- **`--redact [level]`** replaces PII column values with a constant redaction
+  value instead of a realistic fake, so output *visibly* contains no PII — for a
+  dataset handed to a vendor, pasted into a ticket, or committed as a fixture.
+  Text columns become `[REDACTED]`, nullable columns become `NULL`, and other
+  types get a type-safe placeholder (`0`, `false`, the nil UUID, the Unix epoch)
+  so the row still inserts. Works in both the from-scratch generate and the
+  `--subset` copy. The level — `high` (default for a bare `--redact`), `medium`,
+  or `all` — selects which sensitivity tiers are redacted, reusing the existing
+  `classifyColumn` PII classifier (`src/pii.ts`).
+  - **Join keys are never redacted:** a PK/FK/referenced column keeps a valid,
+    consistent value so referential integrity survives. A **unique** PII column
+    gets a distinct `[REDACTED-xxxx]` token (text) or an anonymized value
+    (non-text) per row rather than a colliding constant.
+  - **Explicit intent wins:** a `--column` override and a subset `--preserve`
+    are left untouched.
+  - Threaded through one chokepoint, `inferGenerator` (`src/infer.ts`), which
+    both the generation (`src/generate.ts`) and subset-scrub (`src/subset.ts`)
+    paths already call; redacted columns are also frozen against the
+    coherence/temporal/status rewrite passes so a redaction isn't overwritten.
+  - Exposed as a `redact` field in the config file and a `redact` option on the
+    programmatic `seed()` API (`src/index.ts`).
+
+This supersedes the deferred "auto-scrub private-key columns behind a flag"
+follow-on from roadmap item 3: private-key *key* columns are handled by
+`--scrub-keys` (consistent remap), while `--redact` adds visible redaction for
+every other PII column, in both modes.
+
 ## [0.37.0] — 2026-11-18
 
 ### Added
