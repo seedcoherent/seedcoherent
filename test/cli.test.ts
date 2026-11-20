@@ -251,3 +251,49 @@ test("the CLI exits non-zero when --schema-file can't be read", async () => {
     },
   );
 });
+
+test("unknown --redact level is rejected", async () => {
+  const { file } = await withDdl();
+  const { error } = await capture([
+    "--schema-file",
+    file,
+    "--redact",
+    "bogus",
+    "--print",
+  ]);
+  assert.match(error!.message, /Unknown --redact level 'bogus'/);
+});
+
+test("--redact medium redacts the medium-risk email column", async () => {
+  const { file } = await withDdl();
+  const { stdout, error } = await capture([
+    "--schema-file",
+    file,
+    "--redact",
+    "medium",
+    "--print",
+    "--seed",
+    "42",
+    "--rows",
+    "users=2",
+  ]);
+  assert.equal(error, undefined, error?.message);
+  assert.match(stdout, /\[REDACTED\]/);
+});
+
+test("bare --redact defaults to high, sparing the medium-risk email", async () => {
+  const { file } = await withDdl();
+  const { stdout, error } = await capture([
+    "--schema-file",
+    file,
+    "--redact",
+    "--print",
+    "--seed",
+    "42",
+    "--rows",
+    "users=2",
+  ]);
+  assert.equal(error, undefined, error?.message);
+  // email is medium-risk; at the default `high` level nothing here is redacted.
+  assert.doesNotMatch(stdout, /\[REDACTED\]/);
+});

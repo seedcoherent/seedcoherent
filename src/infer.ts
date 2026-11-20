@@ -8,13 +8,14 @@ import { Faker } from "@faker-js/faker";
 import { valueSampler } from "./distribution.js";
 import type { Row } from "./generate.js";
 import { ctxFor, has, or, tok, type MatchCtx } from "./match.js";
-import { piiGenerator } from "./pii.js";
+import { classifyColumn, piiGenerator, type PiiSensitivity } from "./pii.js";
 import type {
   ColumnCheck,
   ColumnInfo,
   ColumnOverride,
   DistSpec,
   PartitionInfo,
+  RedactLevel,
   TableInfo,
   TypeRef,
 } from "./types.js";
@@ -629,12 +630,23 @@ export function inferGenerator(
   overrides: Record<string, ColumnOverride> = {},
   check?: ColumnCheck,
   dist?: DistSpec,
+  redact?: RedactLevel,
 ): Generator {
   const qualified =
     overrides[`${table.name}.${col.name}`] ??
     overrides[`${table.key}.${col.name}`];
   const bare = overrides[col.name];
   const override = qualified ?? bare;
+
+  // Redact mode replaces a classified PII column's value with a constant
+  // (`[REDACTED]`/NULL/a type-safe placeholder) instead of a realistic fake, so
+  // the output visibly contains no PII. An explicit override is deliberate user
+  // intent and wins, so it is checked first. Join keys never reach here with a
+  // redact decision: in the subset path they flow through the group-remap path,
+  // and in generation an FK column draws from its parent — both bypass this.
+  if (redact && !override && shouldRedact(table, col, redact)) {
+    return redactGenerator(col, isInAnyUnique(table, col.name));
+  }
 
   // A configured value distribution reshapes how a categorical column spreads
   // over its labels. It only runs when the user opted this column in; otherwise
@@ -649,6 +661,85 @@ export function inferGenerator(
 
   const base = baseGenerator(table, col);
   return check ? applyCheck(base, col, check) : base;
+}
+
+/** Sensitivity ordering, high being the most sensitive. */
+const SENSITIVITY_RANK: Record<PiiSensitivity, number> = {
+  high: 3,
+  medium: 2,
+  low: 1,
+};
+
+/** The least sensitivity a column must reach to be redacted at `level`. */
+const REDACT_THRESHOLD: Record<RedactLevel, number> = {
+  high: SENSITIVITY_RANK.high,
+  medium: SENSITIVITY_RANK.medium,
+  all: SENSITIVITY_RANK.low,
+};
+
+/** Is `col` a PII column sensitive enough to redact at the given `level`? */
+export function shouldRedact(
+  table: TableInfo,
+  col: ColumnInfo,
+  level: RedactLevel,
+): boolean {
+  const match = classifyColumn(table, col);
+  if (!match) return false;
+  return SENSITIVITY_RANK[match.sensitivity] >= REDACT_THRESHOLD[level];
+}
+
+/** True if `col` participates in the primary key or any unique constraint. */
+function isInAnyUnique(table: TableInfo, colName: string): boolean {
+  if (table.primaryKey.includes(colName)) return true;
+  return table.uniques.some((u) => u.includes(colName));
+}
+
+/**
+ * A generator that emits a redaction value for `col` — a constant that visibly
+ * marks the cell as scrubbed.
+ *
+ * For a column under a primary-key or unique constraint a single constant would
+ * collide across rows (and exhaust the unique-retry loop), so `unique` columns
+ * instead get a *unique* redaction: a `[REDACTED-xxxx]` token for text, or the
+ * column's ordinary type generator for non-text (a type-valid, name-independent
+ * value — anonymized, though not a literal `[REDACTED]`).
+ *
+ * Otherwise: NULL when the column allows it (the cleanest "no value here"
+ * signal); else a type-safe constant placeholder so the row still inserts —
+ * `[REDACTED]` for text, `0` for numerics, `false` for booleans, the nil UUID,
+ * the Unix epoch for date/time. Anything without a sensible placeholder falls
+ * back to NULL (matching the `unsupported`-type behavior).
+ */
+function redactGenerator(col: ColumnInfo, unique: boolean): Generator {
+  if (unique) {
+    if (col.dataType === "text") {
+      return (f) => `[REDACTED-${f.string.alphanumeric(8)}]`;
+    }
+    // No distinct constant exists for a non-text unique column; fall back to the
+    // type generator, which is name-independent and so still carries no PII.
+    return generatorForType(col);
+  }
+  if (col.nullable) return () => null;
+  switch (col.dataType) {
+    case "text":
+      return () => "[REDACTED]";
+    case "integer":
+    case "decimal":
+      return () => 0;
+    case "money":
+      return () => "0";
+    case "boolean":
+      return () => false;
+    case "uuid":
+      return () => "00000000-0000-0000-0000-000000000000";
+    case "date":
+    case "timestamp":
+      return () => new Date(0);
+    case "time":
+      return () => "00:00:00";
+    default:
+      return () => null;
+  }
 }
 
 /**

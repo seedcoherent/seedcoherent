@@ -8,6 +8,7 @@ import { Faker } from "@faker-js/faker";
 import {
   inferGenerator,
   partitionKeyGenerator,
+  shouldRedact,
   type Generator,
 } from "./infer.js";
 import { applyCoherence, planCoherence } from "./coherence.js";
@@ -399,6 +400,7 @@ export function* streamData(
               config.columns,
               checks.get(col.name),
               dist,
+              config.redact,
             ),
         );
       }
@@ -467,8 +469,19 @@ export function* streamData(
     // already parsed above to spot `status IN (...)` domains.
     const splan = planStatus(table, checks);
     const partitionKeys = new Set(table.partition?.keyColumns ?? []);
+    // Columns whose value --redact replaces with a constant. They must be frozen
+    // so the coherence/temporal/status passes don't overwrite the redaction with
+    // a realistic value (e.g. coherence re-deriving an email from the name).
+    const redactedCols = new Set(
+      config.redact
+        ? table.columns
+            .filter((c) => shouldRedact(table, c, config.redact!))
+            .map((c) => c.name)
+        : [],
+    );
     const frozen = (colName: string) =>
       partitionKeys.has(colName) ||
+      redactedCols.has(colName) ||
       isOverridden(table, colName, config.columns);
     const coherenceEligible = (colName: string) => gens.has(colName);
 

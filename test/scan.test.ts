@@ -145,3 +145,38 @@ test("formatScanReport marks PII copied verbatim and summarizes", () => {
   assert.match(out, /2 PII copied verbatim ⚠/);
   assert.match(out, /9 columns · \d+ PII/);
 });
+
+test("--redact scrubs non-key PII to [REDACTED] but keeps join keys consistent", () => {
+  const s = fixture();
+  const { order } = topoSort(s);
+  // Redact everything classified; anonymize the users.id join key so it is
+  // remapped (not passed verbatim) — it must stay consistent across the FK.
+  const config: Config = {
+    seed: 1,
+    redact: "all",
+    anonymize: ["users.id"],
+  };
+  const selected = new Map<string, Row[]>([
+    [
+      "public.users",
+      [{ id: 1, full_name: "Jane Doe", country: "US", ssn: "111-22-3333" }],
+    ],
+    ["public.orders", [{ id: 7, user_id: 1, note: "hi" }]],
+    ["public.contacts", [{ email: "a@b.com", label: "home" }]],
+  ]);
+
+  const data = anonymizeAll(s, order, selected, config);
+  const users = data.find((d) => d.table.name === "users")!.rows[0];
+  const orders = data.find((d) => d.table.name === "orders")!.rows[0];
+
+  // Non-key PII columns are redacted to the constant token.
+  assert.equal(users.full_name, "[REDACTED]");
+  assert.equal(users.country, "[REDACTED]");
+  assert.equal(users.ssn, "[REDACTED]");
+
+  // The anonymized join key is remapped to a *consistent* value across the FK —
+  // never redacted, so referential integrity survives.
+  assert.notEqual(users.id, "[REDACTED]");
+  assert.notEqual(users.id, 1);
+  assert.equal(orders.user_id, users.id);
+});
