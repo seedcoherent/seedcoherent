@@ -40,9 +40,17 @@ function formatDate(d: Date, col: ColumnInfo): string {
     : iso.slice(0, 23).replace("T", " ");
 }
 
+/** The SRID a spatial column's geometry must be built with; 0 when unknown. */
+const geomSrid = (col: ColumnInfo): number => col.srid ?? 0;
+
 /** Format a JS value as a MySQL SQL literal (for --out/--print scripts). */
 export function mysqlLiteral(v: unknown, col: ColumnInfo): string {
   if (v === null || v === undefined) return "NULL";
+  if (col.dataType === "geo") {
+    // The generator produces a WKT string; MySQL needs it built into a geometry
+    // with the column's SRID — a plain string literal will not coerce.
+    return `ST_GeomFromText('${escapeString(String(v))}', ${geomSrid(col)})`;
+  }
   if (typeof v === "boolean") return v ? "1" : "0";
   if (typeof v === "number") return String(v);
   if (v instanceof Date) return `'${formatDate(v, col)}'`;
@@ -214,7 +222,13 @@ export class MysqlSink implements RowSink {
   ): Promise<void> {
     if (rows.length === 0) return;
     const colList = cols.map((c) => IDENT(c.name)).join(", ");
-    const placeholder = `(${cols.map(() => "?").join(", ")})`;
+    // Spatial columns bind the WKT string through a constructor so it builds a
+    // geometry with the column's SRID; everything else binds as a plain `?`.
+    const placeholder = `(${cols
+      .map((c) =>
+        c.dataType === "geo" ? `ST_GeomFromText(?, ${geomSrid(c)})` : "?",
+      )
+      .join(", ")})`;
     const params: unknown[] = [];
     for (const row of rows) {
       for (const c of cols) params.push(toParam(row[c.name], c));

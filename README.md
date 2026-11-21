@@ -222,7 +222,8 @@ PKs, `uniqueidentifier`, …) is detailed under [Why it's different](#why-its-di
   measure it on your machine.
 - **Four databases, one tool.** Postgres, MySQL, SQLite, and SQL Server, selected
   from the connection string — same flags, same behavior. On MySQL,
-  `AUTO_INCREMENT` PKs, `ENUM`, `tinyint(1)` booleans, `JSON`, and `CHECK`
+  `AUTO_INCREMENT` PKs, `ENUM`, `tinyint(1)` booleans, `JSON`, spatial types
+  (`POINT`/`POLYGON`/… emitted as SRID-aware `ST_GeomFromText`), and `CHECK`
   constraints (8.0.16+) are all understood; rows stream in as batched multi-row
   `INSERT`s (MySQL has no `COPY`). On SQLite, the `INTEGER PRIMARY KEY` rowid
   alias, type affinity (with `DATETIME` / `BOOLEAN` / `JSON` hints honored), and
