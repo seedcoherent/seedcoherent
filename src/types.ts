@@ -57,6 +57,14 @@ export interface ColumnInfo {
   /** numeric(precision, scale), if declared. */
   numericPrecision: number | null;
   numericScale: number | null;
+  /**
+   * For MySQL spatial columns, the declared SRID (spatial reference system id)
+   * from information_schema.ST_GEOMETRY_COLUMNS. Geometry inserted into the
+   * column must be built with a matching SRID, so emit wraps the WKT as
+   * `ST_GeomFromText(wkt, srid)`. Null/undefined for non-spatial columns and on
+   * dialects/servers that don't expose it (defaults to SRID 0 on emit).
+   */
+  srid?: number | null;
 }
 
 export interface ForeignKey {

@@ -66,10 +66,22 @@ export function categorizeMysql(
     case "longtext":
     case "set":
       return "text";
+    case "geometry":
+    case "point":
+    case "linestring":
+    case "polygon":
+    case "multipoint":
+    case "multilinestring":
+    case "multipolygon":
+    case "geometrycollection":
+      // Spatial types. Shares the "geo" category with Postgres PostGIS so the
+      // inference layer stays dialect-agnostic; the specific udtName drives the
+      // WKT shape and emit wraps the literal as ST_GeomFromText(wkt, srid).
+      return "geo";
     default:
-      // Spatial (geometry/point/…) and other types we can't emit a valid literal
-      // for. Flag them "unsupported" so generation NULLs/skips or errors clearly,
-      // instead of inserting lorem text the column rejects.
+      // Other types we can't emit a valid literal for. Flag them "unsupported"
+      // so generation NULLs/skips or errors clearly, instead of inserting lorem
+      // text the column rejects.
       return "unsupported";
   }
 }
@@ -221,6 +233,25 @@ const CHECK_SQL = `
     AND tc.CONSTRAINT_TYPE = 'CHECK';
 `;
 
+interface GeometryColumnRow {
+  schema: string;
+  table_name: string;
+  column_name: string;
+  srid: number | string | null;
+}
+
+// Per-column SRID for spatial columns, exposed only on MySQL 8.0+. Older
+// servers / MariaDB lack this view; the caller tolerates its absence.
+const GEOMETRY_COLUMN_SQL = `
+  SELECT
+    TABLE_SCHEMA  AS \`schema\`,
+    TABLE_NAME    AS table_name,
+    COLUMN_NAME   AS column_name,
+    SRS_ID        AS srid
+  FROM information_schema.ST_GEOMETRY_COLUMNS
+  WHERE TABLE_SCHEMA IN (?);
+`;
+
 const toNum = (v: number | string | null): number | null =>
   v === null || v === undefined ? null : Number(v);
 
@@ -235,6 +266,25 @@ export async function introspectMysql(
   const baseTables = new Set(
     tableRes.rows.map((r) => `${r.schema}.${r.table_name}`),
   );
+
+  // schema.table.column -> SRID, for spatial columns (MySQL 8.0+ only).
+  const sridByColumn = new Map<string, number>();
+  try {
+    const geoRes = await client.query<GeometryColumnRow>(GEOMETRY_COLUMN_SQL, [
+      schemas,
+    ]);
+    for (const row of geoRes.rows) {
+      const srid = toNum(row.srid);
+      if (srid !== null)
+        sridByColumn.set(
+          `${row.schema}.${row.table_name}.${row.column_name}`,
+          srid,
+        );
+    }
+  } catch {
+    // Older server without information_schema.ST_GEOMETRY_COLUMNS — emit falls
+    // back to SRID 0 for any spatial columns.
+  }
 
   const colRes = await client.query<ColumnRow>(COLUMN_SQL, [schemas]);
   const tables = new Map<string, TableInfo>();
@@ -275,6 +325,7 @@ export async function introspectMysql(
       enumValues,
       numericPrecision: toNum(row.numeric_precision),
       numericScale: toNum(row.numeric_scale),
+      srid: sridByColumn.get(`${key}.${row.column_name}`) ?? null,
     };
     table.columns.push(col);
   }

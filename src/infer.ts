@@ -327,12 +327,10 @@ function generatorForType(col: ColumnInfo): Generator {
           .multiple(() => f.lorem.word(), { count: { min: 1, max: 3 } })
           .join(f.helpers.arrayElement([" & ", " | "]));
     case "geo":
-      // PostGIS geometry/geography: a WKT `POINT(lon lat)` literal. Coordinates
-      // stay in lon/lat range so the same literal is valid for geography (which
-      // enforces -180..180 / -90..90) as well as geometry. PostGIS's text input
-      // (assignment) cast parses WKT into the column type on insert.
-      return (f) =>
-        `POINT(${f.location.longitude({ precision: 6 })} ${f.location.latitude({ precision: 6 })})`;
+      // Spatial types, as a WKT literal. Postgres PostGIS (geometry/geography)
+      // coerces WKT via its text-input cast; MySQL emit wraps it in
+      // ST_GeomFromText. The specific udtName picks the shape; see wktGenerator.
+      return wktGenerator(col.udtName);
     case "pg_lsn":
       // A log sequence number: two 32-bit hex halves joined by '/', e.g.
       // "16B3C4D8/0A1F2E00". Postgres parses this textual form directly.
@@ -512,6 +510,57 @@ function geometricGenerator(udtName: string): Generator {
         `<${pt(f)},${f.number.float({ min: 0.1, max: 500, fractionDigits: 2 })}>`;
     default:
       return () => null;
+  }
+}
+
+/**
+ * OGC Well-Known Text for a spatial value, keyed on the specific spatial type
+ * name (MySQL `point`/`linestring`/…/`geometry`, or Postgres PostGIS
+ * `geometry`/`geography`). Both coordinates are drawn from [-90, 90]: valid as
+ * cartesian (SRID 0) and valid as lat/long for SRID 4326 in *either* axis
+ * order, so the one literal inserts cleanly without knowing the column's SRID
+ * or axis convention. A bare `geometry`/`geography` column gets a POINT, the
+ * simplest always-valid geometry.
+ */
+function wktGenerator(udtName: string): Generator {
+  const coord = (f: Faker) =>
+    f.number.float({ min: -90, max: 90, fractionDigits: 6 });
+  const pt = (f: Faker) => `${coord(f)} ${coord(f)}`;
+  const ptList = (f: Faker, n: number) =>
+    Array.from({ length: n }, () => pt(f)).join(", ");
+  // A closed linear ring: n distinct points with the first repeated at the end.
+  const ring = (f: Faker) => {
+    const pts = Array.from({ length: 3 }, () => pt(f));
+    return `(${[...pts, pts[0]].join(", ")})`;
+  };
+  const lineString = (f: Faker) =>
+    `LINESTRING(${ptList(f, f.number.int({ min: 2, max: 4 }))})`;
+  const polygon = (f: Faker) => `POLYGON(${ring(f)})`;
+  switch (udtName.toLowerCase()) {
+    case "linestring":
+      return lineString;
+    case "polygon":
+      return polygon;
+    case "multipoint":
+      return (f) =>
+        `MULTIPOINT(${ptList(f, f.number.int({ min: 2, max: 4 }))})`;
+    case "multilinestring":
+      return (f) =>
+        `MULTILINESTRING(${Array.from(
+          { length: f.number.int({ min: 1, max: 3 }) },
+          () => `(${ptList(f, f.number.int({ min: 2, max: 4 }))})`,
+        ).join(", ")})`;
+    case "multipolygon":
+      return (f) =>
+        `MULTIPOLYGON(${Array.from(
+          { length: f.number.int({ min: 1, max: 3 }) },
+          () => `(${ring(f)})`,
+        ).join(", ")})`;
+    case "geometrycollection":
+      return (f) => `GEOMETRYCOLLECTION(POINT(${pt(f)}), ${lineString(f)})`;
+    default:
+      // point, geometry, geography — a plain POINT.
+      return (f) => `POINT(${pt(f)})`;
   }
 }
 

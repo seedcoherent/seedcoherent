@@ -31,6 +31,23 @@ test("mysqlLiteral formats scalars, dates, blobs, and escapes strings", () => {
   );
 });
 
+test("mysqlLiteral wraps spatial WKT in ST_GeomFromText with the column SRID", () => {
+  const geomDefault = col("g", { udtName: "point", dataType: "geo" });
+  const geom4326 = col("g", { udtName: "point", dataType: "geo", srid: 4326 });
+  // No declared SRID -> default 0.
+  assert.equal(
+    mysqlLiteral("POINT(1 2)", geomDefault),
+    "ST_GeomFromText('POINT(1 2)', 0)",
+  );
+  // Declared SRID is carried into the constructor.
+  assert.equal(
+    mysqlLiteral("POINT(1 2)", geom4326),
+    "ST_GeomFromText('POINT(1 2)', 4326)",
+  );
+  // NULL stays NULL (nullable spatial column).
+  assert.equal(mysqlLiteral(null, geom4326), "NULL");
+});
+
 test("mysqlLiteral renders datetime in UTC keeping sub-seconds, date without a time", () => {
   const d = new Date("2025-01-02T03:04:05.678Z");
   // DATETIME/TIMESTAMP: UTC wall-clock with fractional seconds preserved.
@@ -152,6 +169,29 @@ test("MysqlSink batches a multi-row INSERT inside a transaction", async () => {
     "INSERT INTO `users` (`id`, `c`) VALUES (?, ?), (?, ?)",
   );
   assert.deepEqual(insert.params, [1, "a", 2, "b"]);
+});
+
+test("MysqlSink wraps spatial columns in an ST_GeomFromText placeholder", async () => {
+  const t = table("places", {
+    schema: "app",
+    columns: [
+      col("id", { udtName: "int" }),
+      col("geom", { udtName: "point", dataType: "geo", srid: 4326 }),
+    ],
+  });
+  const conn = new RecordingConn();
+  const sink = await runSink(conn, [
+    { table: t, columns: t.columns, rows: [{ id: 1, geom: "POINT(1 2)" }] },
+  ]);
+  assert.equal(sink.inserted, 1);
+  const insert = conn.calls.find((c) => c.sql.startsWith("INSERT"))!;
+  // The id binds as a plain `?`; the geometry binds through the constructor.
+  assert.equal(
+    insert.sql,
+    "INSERT INTO `places` (`id`, `geom`) VALUES (?, ST_GeomFromText(?, 4326))",
+  );
+  // The WKT string is still passed as a bind parameter (not inlined).
+  assert.deepEqual(insert.params, [1, "POINT(1 2)"]);
 });
 
 test("MysqlSink truncates via reverse-order DELETE with FK checks off", async () => {
