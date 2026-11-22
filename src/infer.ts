@@ -557,8 +557,8 @@ function wktGenerator(udtName: string): Generator {
           () => `(${ring(f)})`,
         ).join(", ")})`;
     case "geometrycollection":
-    // MySQL's canonical spelling of GEOMETRYCOLLECTION (what introspection sees).
     case "geomcollection":
+      // "geomcollection" is MySQL's canonical spelling (what introspection sees).
       return (f) => `GEOMETRYCOLLECTION(POINT(${pt(f)}), ${lineString(f)})`;
     default:
       // point, geometry, geography — a plain POINT.
