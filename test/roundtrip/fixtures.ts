@@ -510,33 +510,52 @@ export const CASES: TypeCase[] = [
       }
     },
   },
+  // ── Spatial ───────────────────────────────────────────────────────────
+  // Postgres (PostGIS) coerces a bare WKT string on insert; MySQL requires the
+  // WKT wrapped in ST_GeomFromText with the column's SRID (src/mysql-emit.ts).
+  // A driver reads geometry back as hex EWKB, a Buffer, or a parsed object, so
+  // the checks only assert a non-null value landed (coerced defensively).
   {
     name: "shape",
-    ddl: { postgres: "geometry NOT NULL" },
+    ddl: { postgres: "geometry NOT NULL", mysql: "GEOMETRY NOT NULL" },
     preamble: { postgres: "CREATE EXTENSION IF NOT EXISTS postgis" },
-    check: (vals) => {
-      for (const v of vals) {
-        // node-postgres reads geometry back as the hex EWKB string; coerce
-        // defensively in case a driver surfaces a parsed object instead.
-        const s =
-          typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
-        assert.ok(s.length > 0, "shape empty");
-      }
-    },
+    check: (vals) => geometryPresent(vals, "shape"),
   },
   {
     name: "place",
-    ddl: { postgres: "geography(Point,4326) NOT NULL" },
-    preamble: { postgres: "CREATE EXTENSION IF NOT EXISTS postgis" },
-    check: (vals) => {
-      for (const v of vals) {
-        const s =
-          typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
-        assert.ok(s.length > 0, "place empty");
-      }
+    ddl: {
+      postgres: "geography(Point,4326) NOT NULL",
+      mysql: "POINT SRID 4326 NOT NULL",
     },
+    preamble: { postgres: "CREATE EXTENSION IF NOT EXISTS postgis" },
+    check: (vals) => geometryPresent(vals, "place"),
+  },
+  {
+    name: "track",
+    ddl: { mysql: "LINESTRING NOT NULL" },
+    check: (vals) => geometryPresent(vals, "track"),
+  },
+  {
+    name: "region",
+    ddl: { mysql: "POLYGON NOT NULL" },
+    check: (vals) => geometryPresent(vals, "region"),
+  },
+  {
+    name: "mix",
+    ddl: { mysql: "GEOMETRYCOLLECTION NOT NULL" },
+    check: (vals) => geometryPresent(vals, "mix"),
   },
 ];
+
+/** Assert every value is a non-null geometry, however the driver surfaces it. */
+function geometryPresent(vals: unknown[], label: string): void {
+  for (const v of vals) {
+    assert.ok(v !== null && v !== undefined, `${label}: null geometry`);
+    const s =
+      typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+    assert.ok(s.length > 0, `${label} empty`);
+  }
+}
 
 /** Cases that declare a DDL fragment for the given engine. */
 export function casesFor(engine: Engine): TypeCase[] {

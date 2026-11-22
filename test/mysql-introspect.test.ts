@@ -70,7 +70,25 @@ test("binary/text/json families", () => {
     assert.equal(cat(t), "text");
   }
   assert.equal(cat("json"), "json");
-  assert.equal(cat("geometry"), "unsupported"); // spatial -> unsupported, not guessed
+});
+
+test("spatial types categorize as geo", () => {
+  for (const t of [
+    "geometry",
+    "point",
+    "linestring",
+    "polygon",
+    "multipoint",
+    "multilinestring",
+    "multipolygon",
+    "geometrycollection",
+    // MySQL 8's canonical name for GEOMETRYCOLLECTION in information_schema.
+    "geomcollection",
+  ]) {
+    assert.equal(cat(t), "geo");
+  }
+  // A genuinely unknown type still falls through to unsupported, not guessed.
+  assert.equal(cat("sql_variant"), "unsupported");
 });
 
 test("enum labels win over the base type", () => {
@@ -121,11 +139,14 @@ function mockConn(fixtures: {
   columns: any[];
   constraints: any[];
   checks?: any[];
+  geometryColumns?: any[];
 }): Connection {
   return {
     async query<T = any>(sql: string): Promise<{ rows: T[] }> {
       let rows: any[] = [];
       if (sql.includes("information_schema.TABLES")) rows = fixtures.tables;
+      else if (sql.includes("ST_GEOMETRY_COLUMNS"))
+        rows = fixtures.geometryColumns ?? [];
       else if (sql.includes("information_schema.COLUMNS"))
         rows = fixtures.columns;
       else if (sql.includes("information_schema.CHECK_CONSTRAINTS"))
@@ -272,6 +293,75 @@ test("introspectMysql builds tables, keys, enums, FKs, and checks", async () => 
   assert.equal(total.dataType, "decimal");
   assert.equal(total.numericScale, 2);
   assert.deepEqual(orders.checks, [{ expr: '("total" >= 0)' }]);
+});
+
+test("introspectMysql captures spatial category and per-column SRID", async () => {
+  const conn = mockConn({
+    tables: [{ schema: "app", table_name: "places" }],
+    columns: [
+      column({
+        table_name: "places",
+        column_name: "id",
+        extra: "auto_increment",
+      }),
+      column({
+        table_name: "places",
+        column_name: "geom",
+        ordinal: 2,
+        data_type: "point",
+        column_type: "point",
+      }),
+      column({
+        table_name: "places",
+        column_name: "area",
+        ordinal: 3,
+        data_type: "polygon",
+        column_type: "polygon",
+      }),
+    ],
+    constraints: [],
+    geometryColumns: [
+      { schema: "app", table_name: "places", column_name: "geom", srid: 4326 },
+      // `area` has no SRS row -> SRID defaults to null (emit uses 0).
+    ],
+  });
+
+  const places = (await introspectMysql(conn, ["app"])).tables.get(
+    "app.places",
+  )!;
+  const geom = places.columns.find((c) => c.name === "geom")!;
+  const area = places.columns.find((c) => c.name === "area")!;
+  assert.equal(geom.dataType, "geo");
+  assert.equal(geom.srid, 4326);
+  assert.equal(area.dataType, "geo");
+  assert.equal(area.srid, null);
+});
+
+test("introspectMysql tolerates servers without ST_GEOMETRY_COLUMNS", async () => {
+  const conn: Connection = {
+    async query<T = any>(sql: string): Promise<{ rows: T[] }> {
+      if (sql.includes("ST_GEOMETRY_COLUMNS")) throw new Error("Unknown table");
+      if (sql.includes("information_schema.TABLES"))
+        return { rows: [{ schema: "app", table_name: "places" }] as T[] };
+      if (sql.includes("information_schema.COLUMNS"))
+        return {
+          rows: [
+            column({
+              table_name: "places",
+              column_name: "geom",
+              data_type: "point",
+              column_type: "point",
+            }),
+          ] as T[],
+        };
+      return { rows: [] as T[] };
+    },
+    async end() {},
+  };
+  const places = (await introspectMysql(conn, ["app"])).tables.get(
+    "app.places",
+  )!;
+  assert.equal(places.columns[0].srid, null);
 });
 
 test("introspectMysql tolerates servers without CHECK_CONSTRAINTS", async () => {

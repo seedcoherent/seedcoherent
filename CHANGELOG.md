@@ -4,6 +4,28 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.39.0] — 2026-11-20
+
+### Added
+
+- **MySQL spatial types.** `GEOMETRY`, `POINT`, `LINESTRING`, `POLYGON`,
+  `MULTIPOINT`, `MULTILINESTRING`, `MULTIPOLYGON`, and `GEOMETRYCOLLECTION`
+  columns are now filled with valid geometry instead of being flagged
+  `unsupported` (NULL'd, or rejected on a NOT NULL column). This closes the main
+  MySQL type-coverage gap behind the Postgres spatial support added in 0.36–0.37,
+  and shares its `geo` category and WKT generator so the inference layer stays
+  dialect-agnostic (`src/infer.ts`).
+  - **Per-column SRID.** The declared SRID is read from
+    `information_schema.ST_GEOMETRY_COLUMNS` during introspection
+    (`src/mysql-introspect.ts`) and the generated WKT is wrapped as
+    `ST_GeomFromText(wkt, srid)` — a plain string literal will not coerce into a
+    geometry column — in both the live `--to` load and the `--out`/`--print`
+    script paths (`src/mysql-emit.ts`). A column with no declared SRID defaults
+    to `0`; servers without the view (older MySQL / MariaDB) are tolerated.
+  - **Axis-order safe.** Both coordinates are drawn from `[-90, 90]`, valid as
+    cartesian (SRID 0) and as lat/long for SRID 4326 in either axis order, so one
+    literal inserts cleanly regardless of the column's SRID convention.
+
 ## [0.38.0] — 2026-11-19
 
 ### Added

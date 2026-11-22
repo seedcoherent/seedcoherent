@@ -31,6 +31,7 @@ export function col(name: string, opts: ColOpts = {}): ColumnInfo {
     enumValues,
     numericPrecision: opts.numericPrecision ?? null,
     numericScale: opts.numericScale ?? null,
+    srid: opts.srid,
   };
 }
 
