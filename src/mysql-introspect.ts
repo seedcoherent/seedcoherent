@@ -74,6 +74,9 @@ export function categorizeMysql(
     case "multilinestring":
     case "multipolygon":
     case "geometrycollection":
+    // MySQL 8 stores GEOMETRYCOLLECTION under its canonical name GEOMCOLLECTION,
+    // so information_schema.DATA_TYPE reports "geomcollection".
+    case "geomcollection":
       // Spatial types. Shares the "geo" category with Postgres PostGIS so the
       // inference layer stays dialect-agnostic; the specific udtName drives the
       // WKT shape and emit wraps the literal as ST_GeomFromText(wkt, srid).

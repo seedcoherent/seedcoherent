@@ -82,6 +82,8 @@ test("spatial types categorize as geo", () => {
     "multilinestring",
     "multipolygon",
     "geometrycollection",
+    // MySQL 8's canonical name for GEOMETRYCOLLECTION in information_schema.
+    "geomcollection",
   ]) {
     assert.equal(cat(t), "geo");
   }
